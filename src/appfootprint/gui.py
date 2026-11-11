@@ -332,14 +332,21 @@ class RuntimeDialog(QDialog):
         explanation.setWordWrap(True)
         content_layout.addWidget(explanation)
         users = direct_runtime_users(item, items)
+        heading = QLabel(
+            f"Applications using this runtime directly ({len(users)})"
+            if users else "No direct application users found"
+        )
+        heading_font = heading.font()
+        heading_font.setBold(True)
+        heading_font.setPointSize(heading_font.pointSize() + 1)
+        heading.setFont(heading_font)
+        heading.setWordWrap(True)
+        content_layout.addWidget(heading)
         if users:
-            apps = "\n".join(
+            # Separate selectable entries from the explanatory paragraphs.
+            usage = QLabel("\\n".join(
                 f"• {app.app_id} ({app.installation})" for app in users
-            )
-            usage = QLabel(
-                f"Applications declaring this runtime directly ({len(users)}):\n"
-                + apps
-            )
+            ))
         else:
             usage = QLabel(
                 "No installed applications in this scan declare this exact "
