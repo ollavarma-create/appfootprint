@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "appfootprint"
+version = "0.1.0a1"
+description = "Read-only graphical Flatpak storage inventory for Linux"
+requires-python = ">=3.10"
+license = "GPL-3.0-only"
+dependencies = ["PySide6>=6.6"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+appfootprint = "appfootprint.gui:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
