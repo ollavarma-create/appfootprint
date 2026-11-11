@@ -32,3 +32,92 @@ def test_parse_flatpak_list(monkeypatch):
     assert len(items) == 1
     assert items[0].installation == "system"
     assert items[0].app_id == "org.kicad.KiCad"
+
+def test_system_app_user_data_is_scanned(monkeypatch, tmp_path: Path):
+    from appfootprint import scanner
+    monkeypatch.setattr(scanner.shutil, "which", lambda name: "/usr/bin/flatpak")
+    monkeypatch.setattr(scanner, "_list", lambda kind: [
+        scanner.Item("org.example.App", "app/org.example.App/x86_64/stable",
+                     "system", "app")
+    ] if kind == "app" else [])
+    monkeypatch.setattr(scanner, "run_flatpak", lambda *args:
+                        str(tmp_path / "deployment") if "--show-location" in args
+                        else "org.freedesktop.Platform/x86_64/25.08")
+    (tmp_path / "deployment").mkdir()
+    home = tmp_path / "home"
+    data = home / ".var" / "app" / "org.example.App"
+    data.mkdir(parents=True)
+    (data / "cache").write_bytes(b"x" * 8192)
+    monkeypatch.setattr(scanner.Path, "home", lambda: home)
+    items, issues = scanner.scan()
+    assert not issues
+    assert items[0].user_data_bytes is not None
+    assert items[0].user_data_bytes >= 8192
+
+def test_user_data_breakdown_for_system_app(monkeypatch, tmp_path: Path):
+    from appfootprint import scanner
+    monkeypatch.setattr(scanner.shutil, "which", lambda _: "/usr/bin/flatpak")
+    monkeypatch.setattr(scanner, "_list", lambda kind: [
+        scanner.Item("org.example.App", "app/org.example.App/x86_64/stable",
+                     "system", "app")
+    ] if kind == "app" else [])
+    deployment = tmp_path / "deployment"
+    deployment.mkdir()
+    monkeypatch.setattr(scanner, "run_flatpak", lambda *args:
+                        str(deployment) if "--show-location" in args
+                        else "org.freedesktop.Platform/x86_64/25.08")
+    home = tmp_path / "home"
+    data = home / ".var" / "app" / "org.example.App"
+    (data / "cache").mkdir(parents=True)
+    (data / "cache" / "file").write_bytes(b"x" * 8192)
+    monkeypatch.setattr(scanner.Path, "home", lambda: home)
+    items, issues = scanner.scan()
+    assert not issues
+    assert items[0].user_data_bytes is not None
+    assert any(name == "cache" and size >= 8192
+               for name, size in items[0].user_data_breakdown)
+
+
+def test_scan_reports_current_item(monkeypatch, tmp_path: Path):
+    from appfootprint import scanner
+    monkeypatch.setattr(scanner.shutil, "which", lambda _: "/usr/bin/flatpak")
+    monkeypatch.setattr(scanner, "_list", lambda kind: [
+        scanner.Item("org.example.App", "app/org.example.App/x86_64/stable",
+                     "system", "app")
+    ] if kind == "app" else [])
+    deployment = tmp_path / "deployment"
+    deployment.mkdir()
+    monkeypatch.setattr(scanner, "run_flatpak", lambda *args:
+                        str(deployment) if "--show-location" in args
+                        else "org.freedesktop.Platform/x86_64/25.08")
+    monkeypatch.setattr(scanner.Path, "home", lambda: tmp_path)
+    messages = []
+    items, issues = scanner.scan(progress=messages.append)
+    assert len(items) == 1
+    assert not issues
+    assert messages == ["Scanning org.example.App (1/1)…"]
+
+
+def test_cancelled_walk_stops_mid_directory(tmp_path: Path):
+    from appfootprint.scanner import ScanCancelled
+    root = tmp_path / "many"
+    root.mkdir()
+    for i in range(10):
+        (root / str(i)).write_bytes(b"hello")
+    checks = 0
+
+    def cancel():
+        nonlocal checks
+        checks += 1
+        return checks >= 3
+
+    with pytest.raises(ScanCancelled):
+        allocated_size(root, cancelled=cancel)
+
+
+def test_scan_cancelled_before_listing(monkeypatch):
+    from appfootprint import scanner
+    monkeypatch.setattr(scanner.shutil, "which", lambda _: "/usr/bin/flatpak")
+    monkeypatch.setattr(scanner, "_list", lambda kind: pytest.fail("listing should not run"))
+    with pytest.raises(scanner.ScanCancelled):
+        scanner.scan(cancelled=lambda: True)
