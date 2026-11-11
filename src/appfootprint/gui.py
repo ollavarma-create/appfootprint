@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
+from .extensions import compatible_extension, parse_extension_points
 from .scanner import Item, ScanCancelled, allocated_size, direct_runtime_users, runtime_extension_hint, format_size, scan
 from .advisor import assess_path, space_significance
 
@@ -381,6 +382,59 @@ class RuntimeDialog(QDialog):
         )
         note.setWordWrap(True)
         content_layout.addWidget(note)
+        # A metadata match is a possible extension relationship, not proof
+        # that Flatpak has enabled or loaded this extension.
+        matches = []
+        for platform in items:
+            if platform.kind != "runtime" or not platform.metadata:
+                continue
+            try:
+                points = parse_extension_points(platform.metadata)
+            except ValueError:
+                continue
+            for point in points:
+                if item is platform:
+                    for extension in items:
+                        if extension is platform or extension.kind != "runtime":
+                            continue
+                        if compatible_extension(point, extension.ref, platform.ref):
+                            matches.append(
+                                f"• {extension.ref} — {point.name}"
+                                + (f" ({', '.join(point.conditions)})" if point.conditions else "")
+                            )
+                elif compatible_extension(point, item.ref, platform.ref):
+                    possible_apps = direct_runtime_users(platform, items)
+                    app_names = ", ".join(app.app_id for app in possible_apps)
+                    matches.append(
+                        f"• {platform.ref} — {point.name}"
+                        + (f" ({', '.join(point.conditions)})" if point.conditions else "")
+                        + (f"; potential apps: {app_names}" if app_names else
+                           "; no direct application users identified")
+                    )
+        metadata_heading = QLabel(
+            "Compatible installed extensions (metadata)"
+            if item.metadata else "Compatible platform extension points (metadata)"
+        )
+        metadata_font = metadata_heading.font()
+        metadata_font.setBold(True)
+        metadata_font.setPointSize(metadata_font.pointSize() + 1)
+        metadata_heading.setFont(metadata_font)
+        content_layout.addWidget(metadata_heading)
+        metadata_text = QLabel(
+            "\n".join(dict.fromkeys(matches)) if matches else
+            "No compatible installed extension relationships verified from "
+            "the available runtime metadata."
+        )
+        metadata_text.setWordWrap(True)
+        metadata_text.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        content_layout.addWidget(metadata_text)
+        caveat = QLabel(
+            "Compatibility is inferred from declared extension points, "
+            "architecture and allowed branches. It does not prove that an "
+            "extension is active, selected by the driver, or safe to remove."
+        )
+        caveat.setWordWrap(True)
+        content_layout.addWidget(caveat)
         if item.errors:
             errors = QLabel("Scan issues: " + "; ".join(item.errors))
             errors.setWordWrap(True)
