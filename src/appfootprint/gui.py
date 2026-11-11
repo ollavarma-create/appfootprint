@@ -541,9 +541,41 @@ class NavigationDialog(QDialog):
         self.stack.setCurrentWidget(self._pages[key])
         self.back_button.setEnabled(self._position > 0)
         self.forward_button.setEnabled(self._position + 1 < len(self._history))
-        names = [entry[1].split("/")[0] for entry in self._history[:self._position + 1]]
-        self.breadcrumb.setText(" › ".join(names))
-        self.breadcrumb.setToolTip(" › ".join(entry[1] for entry in self._history[:self._position + 1]))
+        self._update_history_label()
+
+    def _update_history_label(self) -> None:
+        """Keep the current component visible; preserve the full route on hover."""
+        route = self._history[:self._position + 1]
+        if not route:
+            return
+        names = [entry[1].split("/")[0] for entry in route]
+        # A return to an earlier component is valid graph navigation, not a
+        # new dependency edge. Mark it rather than silently removing it.
+        labels = [
+            ("↩ " if name in names[:index] else "") + name
+            for index, name in enumerate(names)
+        ]
+        visible = labels[-3:]
+        prefix = "… › " if len(labels) > 3 else ""
+        self.breadcrumb.setText("History: " + prefix + " › ".join(visible))
+        self.breadcrumb.setToolTip(
+            "Navigation history (↩ = previously visited component):\\n"
+            + " › ".join(entry[1] for entry in route)
+        )
+        self.breadcrumb.setMinimumWidth(0)
+        self.breadcrumb.setWordWrap(False)
+        self.breadcrumb.setText(
+            self.breadcrumb.fontMetrics().elidedText(
+                self.breadcrumb.text(),
+                Qt.TextElideMode.ElideLeft,
+                max(80, self.breadcrumb.width() - 8),
+            )
+        )
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if self._position >= 0:
+            self._update_history_label()
 
     def back(self) -> None:
         if self._position > 0:
