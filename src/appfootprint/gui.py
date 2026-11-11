@@ -5,12 +5,13 @@ import sys
 from threading import Event
 
 from pathlib import Path
+from collections.abc import Callable
 
 from PySide6.QtCore import QObject, QRunnable, QThread, QThreadPool, Signal, Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication, QDialog, QDialogButtonBox, QHeaderView, QLabel, QMenu,
-    QMainWindow, QProgressBar, QPushButton, QScrollArea, QTableWidget, QTableWidgetItem,
+    QMainWindow, QProgressBar, QPushButton, QScrollArea, QStackedWidget, QHBoxLayout, QTableWidget, QTableWidgetItem,
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
@@ -297,7 +298,8 @@ class DetailDialog(QDialog):
 class RuntimeDialog(QDialog):
     """Explain shared Flatpak runtimes without attributing them to one app."""
 
-    def __init__(self, item: Item, items: list[Item], parent: QWidget | None = None):
+    def __init__(self, item: Item, items: list[Item], parent: QWidget | None = None,
+                 navigate: Callable[[Item], None] | None = None):
         super().__init__(parent)
         self.setWindowTitle(f"Shared runtime — {item.app_id}")
         self.resize(760, 480)
@@ -363,7 +365,9 @@ class RuntimeDialog(QDialog):
             target = node.data(0, Qt.ItemDataRole.UserRole)
             if not isinstance(target, Item):
                 return
-            if target.kind == "runtime":
+            if navigate is not None:
+                navigate(target)
+            elif target.kind == "runtime":
                 RuntimeDialog(target, items, self).exec()
             elif target.kind == "app":
                 DetailDialog(target, self).exec()
@@ -476,6 +480,80 @@ class RuntimeDialog(QDialog):
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+
+class NavigationDialog(QDialog):
+    """One-window history with preserved Qt page state."""
+
+    def __init__(self, initial: Item, items: list[Item], parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setWindowTitle("AppFootprint — Dependency Explorer")
+        self.resize(950, 650)
+        self._items = items
+        self._history: list[tuple[str, str, str]] = []
+        self._position = -1
+        self._pages: dict[tuple[str, str, str], QWidget] = {}
+        layout = QVBoxLayout(self)
+        toolbar = QHBoxLayout()
+        self.back_button = QPushButton("← Back")
+        self.forward_button = QPushButton("Forward →")
+        self.breadcrumb = QLabel()
+        self.breadcrumb.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        toolbar.addWidget(self.back_button)
+        toolbar.addWidget(self.forward_button)
+        toolbar.addWidget(self.breadcrumb, 1)
+        layout.addLayout(toolbar)
+        self.stack = QStackedWidget()
+        layout.addWidget(self.stack, 1)
+        close = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        close.rejected.connect(self.reject)
+        layout.addWidget(close)
+        self.back_button.clicked.connect(self.back)
+        self.forward_button.clicked.connect(self.forward)
+        self.navigate(initial)
+
+    @staticmethod
+    def key(item: Item) -> tuple[str, str, str]:
+        return (item.kind, item.ref, item.installation)
+
+    def navigate(self, item: Item) -> None:
+        key = self.key(item)
+        if key not in self._pages:
+            if item.kind == "runtime":
+                page = RuntimeDialog(item, self._items, self, navigate=self.navigate)
+            elif item.kind == "app":
+                page = DetailDialog(item, self)
+            else:
+                return
+            for buttons in page.findChildren(QDialogButtonBox):
+                buttons.hide()
+            self._pages[key] = page
+            self.stack.addWidget(page)
+        if self._position >= 0 and self._history[self._position] == key:
+            return
+        self._history = self._history[:self._position + 1]
+        self._history.append(key)
+        self._position += 1
+        self._show_current()
+
+    def _show_current(self) -> None:
+        key = self._history[self._position]
+        self.stack.setCurrentWidget(self._pages[key])
+        self.back_button.setEnabled(self._position > 0)
+        self.forward_button.setEnabled(self._position + 1 < len(self._history))
+        names = [entry[1].split("/")[0] for entry in self._history[:self._position + 1]]
+        self.breadcrumb.setText(" › ".join(names))
+        self.breadcrumb.setToolTip(" › ".join(entry[1] for entry in self._history[:self._position + 1]))
+
+    def back(self) -> None:
+        if self._position > 0:
+            self._position -= 1
+            self._show_current()
+
+    def forward(self) -> None:
+        if self._position + 1 < len(self._history):
+            self._position += 1
+            self._show_current()
 
 
 class MainWindow(QMainWindow):
@@ -597,13 +675,9 @@ class MainWindow(QMainWindow):
         if not isinstance(original_index, int):
             return
         item = self.items[original_index]
-        if item.kind == "runtime":
-            dialog = RuntimeDialog(item, self.items, self)
-        elif item.kind == "app":
-            dialog = DetailDialog(item, self)
-        else:
+        if item.kind not in ("runtime", "app"):
             return
-        dialog.exec()
+        NavigationDialog(item, self.items, self).exec()
 
 
 def main() -> None:
