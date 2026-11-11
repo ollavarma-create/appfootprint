@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
-from .scanner import Item, ScanCancelled, allocated_size, format_size, scan
+from .scanner import Item, ScanCancelled, allocated_size, direct_runtime_users, format_size, scan
 from .advisor import assess_path, space_significance
 
 
@@ -296,7 +296,7 @@ class DetailDialog(QDialog):
 class RuntimeDialog(QDialog):
     """Explain shared Flatpak runtimes without attributing them to one app."""
 
-    def __init__(self, item: Item, parent: QWidget | None = None):
+    def __init__(self, item: Item, items: list[Item], parent: QWidget | None = None):
         super().__init__(parent)
         self.setWindowTitle(f"Shared runtime — {item.app_id}")
         self.resize(700, 330)
@@ -323,6 +323,32 @@ class RuntimeDialog(QDialog):
         )
         explanation.setWordWrap(True)
         layout.addWidget(explanation)
+        users = direct_runtime_users(item, items)
+        if users:
+            apps = "\n".join(
+                f"• {app.app_id} ({app.installation})" for app in users
+            )
+            usage = QLabel(
+                f"Applications declaring this runtime directly ({len(users)}):\n"
+                + apps
+            )
+        else:
+            usage = QLabel(
+                "No installed applications in this scan declare this exact "
+                "runtime directly. This does not prove it is unused: "
+                "extensions and indirect dependencies are not assessed."
+            )
+        usage.setWordWrap(True)
+        usage.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        layout.addWidget(usage)
+        note = QLabel(
+            "Matches use runtime ID, architecture and branch from the "
+            "inventory snapshot. A matching runtime in another installation "
+            "scope may also exist; this list does not establish which "
+            "deployment an application actually loads."
+        )
+        note.setWordWrap(True)
+        layout.addWidget(note)
         if item.errors:
             errors = QLabel("Scan issues: " + "; ".join(item.errors))
             errors.setWordWrap(True)
@@ -452,7 +478,7 @@ class MainWindow(QMainWindow):
             return
         item = self.items[original_index]
         if item.kind == "runtime":
-            dialog = RuntimeDialog(item, self)
+            dialog = RuntimeDialog(item, self.items, self)
         elif item.kind == "app":
             dialog = DetailDialog(item, self)
         else:
