@@ -6,9 +6,10 @@ from threading import Event
 
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QRunnable, QThread, QThreadPool, Signal, Qt
+from PySide6.QtCore import QObject, QRunnable, QThread, QThreadPool, Signal, Qt, QUrl
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
-    QApplication, QDialog, QDialogButtonBox, QHeaderView, QLabel,
+    QApplication, QDialog, QDialogButtonBox, QHeaderView, QLabel, QMenu,
     QMainWindow, QProgressBar, QPushButton, QTableWidget, QTableWidgetItem,
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
@@ -146,6 +147,8 @@ class DetailDialog(QDialog):
         self.tree.sortItems(1, Qt.SortOrder.DescendingOrder)
         self.tree.setColumnWidth(0, 660)
         self.tree.itemExpanded.connect(self.expand_directory)
+        self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self.show_path_menu)
         layout.addWidget(self.tree)
 
         root_path = Path(item.user_data_path)
@@ -180,6 +183,29 @@ class DetailDialog(QDialog):
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def show_path_menu(self, position) -> None:
+        """Only offer navigation for real entries, never placeholder rows."""
+        node = self.tree.itemAt(position)
+        if node is None:
+            return
+        path = node.data(0, Qt.ItemDataRole.UserRole)
+        if not isinstance(path, str) or not path:
+            return
+        menu = QMenu(self.tree)
+        copy_action = menu.addAction("Copy path")
+        open_action = menu.addAction("Open in file manager")
+        selected = menu.exec(self.tree.viewport().mapToGlobal(position))
+        if selected == copy_action:
+            QApplication.clipboard().setText(path)
+            self.status.setText(f"Copied path: {path}")
+        elif selected == open_action:
+            target = Path(path)
+            # QDesktopServices uses the system's default file manager.
+            # For files, open the parent directory instead of executing them.
+            directory = target if target.is_dir() else target.parent
+            if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(directory))):
+                self.status.setText(f"Could not open file manager: {directory}")
 
     def expand_directory(self, node: QTreeWidgetItem) -> None:
         path = node.data(0, Qt.ItemDataRole.UserRole)
