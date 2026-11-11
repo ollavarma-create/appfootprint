@@ -349,18 +349,35 @@ class RuntimeDialog(QDialog):
         tree.setRootIsDecorated(True)
         tree.setAlternatingRowColors(True)
         tree.setMinimumHeight(240)
+        tree.setToolTip("Double-click a component to open its details. No rescan is performed.")
         tree.setTextElideMode(Qt.TextElideMode.ElideMiddle)
         tree.setSelectionMode(QTreeWidget.SelectionMode.SingleSelection)
         content_layout.addWidget(tree)
 
+        def navigable(node: QTreeWidgetItem, target: Item, relation: str) -> None:
+            node.setData(0, Qt.ItemDataRole.UserRole, target)
+            node.setToolTip(0, f"{target.ref} ({target.installation})\n{relation}\nDouble-click to open details")
+            node.setToolTip(1, relation)
+
+        def show_target(node: QTreeWidgetItem, _column: int) -> None:
+            target = node.data(0, Qt.ItemDataRole.UserRole)
+            if not isinstance(target, Item):
+                return
+            if target.kind == "runtime":
+                RuntimeDialog(target, items, self).exec()
+            elif target.kind == "app":
+                DetailDialog(target, self).exec()
+
+        tree.itemDoubleClicked.connect(show_target)
         users = direct_runtime_users(item, items)
         apps_root = QTreeWidgetItem(
             tree, [f"Direct applications ({len(users)})", "Declared primary runtime"]
         )
         for app in users:
-            QTreeWidgetItem(
+            node = QTreeWidgetItem(
                 apps_root, [f"{app.app_id} ({app.installation})", "Direct"]
             )
+            navigable(node, app, "Application declares this primary runtime")
         if not users:
             QTreeWidgetItem(
                 apps_root, ["No primary-runtime matches found", "Not proof of non-use"]
@@ -382,21 +399,25 @@ class RuntimeDialog(QDialog):
                         if extension is platform or extension.kind != "runtime":
                             continue
                         if compatible_extension(point, extension.ref, platform.ref):
-                            extension_rows.append((extension.ref, point))
+                            extension_rows.append((extension, point))
                 elif compatible_extension(point, item.ref, platform.ref):
                     platform_rows.append((platform, point))
 
         if extension_rows or (item.metadata and not platform_rows):
             distinct = list(dict.fromkeys(
-                (ref, point.name, point.conditions)
-                for ref, point in extension_rows
+                (extension.ref, point.name, point.conditions)
+                for extension, point in extension_rows
             ))
             ext_root = QTreeWidgetItem(
                 tree, [f"Compatible installed extensions ({len(distinct)})",
                        "Metadata compatibility"]
             )
             for ref, point_name, conditions in distinct:
-                node = QTreeWidgetItem(ext_root, [ref, point_name])
+                node = QTreeWidgetItem(ext_root, [ref, "Compatible extension"])
+                target = next((e for e, p in extension_rows
+                               if e.ref == ref and p.name == point_name), None)
+                if target is not None:
+                    navigable(node, target, f"Compatible via {point_name}; activation not verified")
                 for condition in conditions:
                     QTreeWidgetItem(node, [condition, "Activation condition"])
         else:
@@ -409,22 +430,25 @@ class RuntimeDialog(QDialog):
                        "Metadata compatibility"]
             )
             for platform_ref, point_name, conditions in distinct_platforms:
-                node = QTreeWidgetItem(platforms_root, [platform_ref, point_name])
+                node = QTreeWidgetItem(platforms_root, [platform_ref, "Compatible platform"])
+                platform = next(
+                    p for p, point in platform_rows
+                    if p.ref == platform_ref and point.name == point_name
+                )
+                navigable(node, platform, f"Extension point: {point_name}; activation not verified")
                 for condition in conditions:
                     QTreeWidgetItem(node, [condition, "Activation condition"])
-                platform = next(
-                    p for p, _ in platform_rows if p.ref == platform_ref
-                )
                 possible = direct_runtime_users(platform, items)
                 apps = QTreeWidgetItem(
                     node, [f"Potential applications ({len(possible)})",
                            "Via primary platform"]
                 )
                 for app in possible:
-                    QTreeWidgetItem(
+                    app_node = QTreeWidgetItem(
                         apps, [f"{app.app_id} ({app.installation})",
                                "Potential, not verified"]
                     )
+                    navigable(app_node, app, "Potential user via compatible platform; not verified")
 
         apps_root.setExpanded(True)
         for i in range(tree.topLevelItemCount()):
@@ -437,6 +461,7 @@ class RuntimeDialog(QDialog):
             1, QHeaderView.ResizeMode.ResizeToContents
         )
         legend = QLabel(
+            "Double-click an application, platform or extension to open its details. "
             "Direct = application-declared primary runtime. "
             "Compatible = metadata-based possibility, not verified activation. "
             "A missing match does not prove a runtime is unused. "
