@@ -344,47 +344,31 @@ class RuntimeDialog(QDialog):
             extension_details.setWordWrap(True)
             content_layout.addWidget(extension_details)
 
+        tree = QTreeWidget()
+        tree.setHeaderLabels(["Dependency / component", "Relationship"])
+        tree.setRootIsDecorated(True)
+        tree.setAlternatingRowColors(True)
+        tree.setMinimumHeight(240)
+        tree.setTextElideMode(Qt.TextElideMode.ElideMiddle)
+        tree.setSelectionMode(QTreeWidget.SelectionMode.SingleSelection)
+        content_layout.addWidget(tree)
+
         users = direct_runtime_users(item, items)
-        heading = QLabel(
-            f"Applications declaring this primary runtime ({len(users)})"
-            if users else "No primary-runtime matches found"
+        apps_root = QTreeWidgetItem(
+            tree, [f"Direct applications ({len(users)})", "Declared primary runtime"]
         )
-        heading_font = heading.font()
-        heading_font.setBold(True)
-        heading_font.setPointSize(heading_font.pointSize() + 1)
-        heading.setFont(heading_font)
-        heading.setWordWrap(True)
-        content_layout.addWidget(heading)
-        if users:
-            usage = QLabel("\n".join(
-                f"• {app.app_id} ({app.installation})" for app in users
-            ))
-        else:
-            usage = QLabel(
-                "This inventory found no applications declaring this exact "
-                "reference as their primary runtime. "
-                + (
-                    "That is expected for many runtime extensions; their "
-                    "use is not captured by this comparison."
-                    if extension_hint else
-                    "This does not prove it is unused: extensions and "
-                    "indirect dependencies are not assessed."
-                )
+        for app in users:
+            QTreeWidgetItem(
+                apps_root, [f"{app.app_id} ({app.installation})", "Direct"]
             )
-        usage.setWordWrap(True)
-        usage.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        content_layout.addWidget(usage)
-        note = QLabel(
-            "Matches use runtime ID, architecture and branch from the "
-            "inventory snapshot. A matching runtime in another installation "
-            "scope may also exist; this list does not establish which "
-            "deployment an application actually loads."
-        )
-        note.setWordWrap(True)
-        content_layout.addWidget(note)
-        # A metadata match is a possible extension relationship, not proof
-        # that Flatpak has enabled or loaded this extension.
-        matches = []
+        if not users:
+            QTreeWidgetItem(
+                apps_root, ["No primary-runtime matches found", "Not proof of non-use"]
+            )
+
+        # Inspect both directions. A match means metadata compatibility only.
+        extension_rows = []
+        platform_rows = []
         for platform in items:
             if platform.kind != "runtime" or not platform.metadata:
                 continue
@@ -398,43 +382,68 @@ class RuntimeDialog(QDialog):
                         if extension is platform or extension.kind != "runtime":
                             continue
                         if compatible_extension(point, extension.ref, platform.ref):
-                            matches.append(
-                                f"• {extension.ref} — {point.name}"
-                                + (f" ({', '.join(point.conditions)})" if point.conditions else "")
-                            )
+                            extension_rows.append((extension.ref, point))
                 elif compatible_extension(point, item.ref, platform.ref):
-                    possible_apps = direct_runtime_users(platform, items)
-                    app_names = ", ".join(app.app_id for app in possible_apps)
-                    matches.append(
-                        f"• {platform.ref} — {point.name}"
-                        + (f" ({', '.join(point.conditions)})" if point.conditions else "")
-                        + (f"; potential apps: {app_names}" if app_names else
-                           "; no direct application users identified")
+                    platform_rows.append((platform, point))
+
+        if extension_rows or item.metadata:
+            distinct = list(dict.fromkeys(
+                (ref, point.name, point.conditions)
+                for ref, point in extension_rows
+            ))
+            ext_root = QTreeWidgetItem(
+                tree, [f"Compatible installed extensions ({len(distinct)})",
+                       "Metadata compatibility"]
+            )
+            for ref, point_name, conditions in distinct:
+                node = QTreeWidgetItem(ext_root, [ref, point_name])
+                for condition in conditions:
+                    QTreeWidgetItem(node, [condition, "Activation condition"])
+        else:
+            distinct_platforms = list(dict.fromkeys(
+                (platform.ref, point.name, point.conditions)
+                for platform, point in platform_rows
+            ))
+            platforms_root = QTreeWidgetItem(
+                tree, [f"Compatible platforms ({len(distinct_platforms)})",
+                       "Metadata compatibility"]
+            )
+            for platform_ref, point_name, conditions in distinct_platforms:
+                node = QTreeWidgetItem(platforms_root, [platform_ref, point_name])
+                for condition in conditions:
+                    QTreeWidgetItem(node, [condition, "Activation condition"])
+                platform = next(
+                    p for p, _ in platform_rows if p.ref == platform_ref
+                )
+                possible = direct_runtime_users(platform, items)
+                apps = QTreeWidgetItem(
+                    node, [f"Potential applications ({len(possible)})",
+                           "Via primary platform"]
+                )
+                for app in possible:
+                    QTreeWidgetItem(
+                        apps, [f"{app.app_id} ({app.installation})",
+                               "Potential, not verified"]
                     )
-        metadata_heading = QLabel(
-            "Compatible installed extensions (metadata)"
-            if item.metadata else "Compatible platform extension points (metadata)"
+
+        apps_root.setExpanded(True)
+        for i in range(tree.topLevelItemCount()):
+            tree.topLevelItem(i).setExpanded(True)
+        tree.header().setStretchLastSection(False)
+        tree.header().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.Stretch
         )
-        metadata_font = metadata_heading.font()
-        metadata_font.setBold(True)
-        metadata_font.setPointSize(metadata_font.pointSize() + 1)
-        metadata_heading.setFont(metadata_font)
-        content_layout.addWidget(metadata_heading)
-        metadata_text = QLabel(
-            "\n".join(dict.fromkeys(matches)) if matches else
-            "No compatible installed extension relationships verified from "
-            "the available runtime metadata."
+        tree.header().setSectionResizeMode(
+            1, QHeaderView.ResizeMode.ResizeToContents
         )
-        metadata_text.setWordWrap(True)
-        metadata_text.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        content_layout.addWidget(metadata_text)
-        caveat = QLabel(
-            "Compatibility is inferred from declared extension points, "
-            "architecture and allowed branches. It does not prove that an "
-            "extension is active, selected by the driver, or safe to remove."
+        legend = QLabel(
+            "Direct = application-declared primary runtime. "
+            "Compatible = metadata-based possibility, not verified activation. "
+            "A missing match does not prove a runtime is unused. "
+            "Installed size is not guaranteed reclaimable."
         )
-        caveat.setWordWrap(True)
-        content_layout.addWidget(caveat)
+        legend.setWordWrap(True)
+        content_layout.addWidget(legend)
         if item.errors:
             errors = QLabel("Scan issues: " + "; ".join(item.errors))
             errors.setWordWrap(True)
