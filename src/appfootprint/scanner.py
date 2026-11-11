@@ -104,13 +104,15 @@ def scan() -> tuple[list[Item], list[str]]:
                                            item.ref).strip()
         except (OSError, subprocess.SubprocessError) as exc:
             item.errors.append(str(exc))
-        if item.kind == "app" and item.installation == "user":
+        if item.kind == "app":
             data_dir = Path.home() / ".var" / "app" / item.app_id
             if data_dir.exists():
                 try:
                     item.user_data_bytes = allocated_size(data_dir)
                 except OSError as exc:
                     item.errors.append(f"User data: {exc}")
+            else:
+                item.user_data_bytes = 0
     return items, issues
 
 
