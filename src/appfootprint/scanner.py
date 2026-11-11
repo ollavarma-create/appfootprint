@@ -157,18 +157,23 @@ def format_size(value: int | None) -> str:
 
 
 def direct_runtime_users(runtime: Item, items: list[Item]) -> list[Item]:
-    """Find direct app users of an installed runtime from the scan snapshot.
+    """Find apps declaring the same runtime name, architecture and branch.
 
-    Compare full name/architecture/branch, not just the runtime ID.
-    Applications can use runtimes from a different installation scope.
-    Extensions and indirect dependencies are intentionally not inferred.
+    Flatpak's --columns=ref output may omit the 'runtime/' type prefix.
+    Installed runtime extensions and indirect dependencies are not inferred.
     """
-    if runtime.kind != "runtime" or not runtime.ref.startswith("runtime/"):
+    if runtime.kind != "runtime":
         return []
-    target = runtime.ref.removeprefix("runtime/")
+
+    def normalized(ref: str) -> str:
+        return ref.strip().removeprefix("runtime/")
+
+    target = normalized(runtime.ref)
+    if len(target.split("/")) != 3:
+        return []
     return sorted(
         (item for item in items
          if item.kind == "app"
-         and item.runtime == target),
+         and normalized(item.runtime) == target),
         key=lambda item: item.app_id.casefold(),
     )
