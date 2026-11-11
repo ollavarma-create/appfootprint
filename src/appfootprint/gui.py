@@ -4,14 +4,16 @@ from __future__ import annotations
 import sys
 from threading import Event
 
-from PySide6.QtCore import QThread, Signal, Qt
+from pathlib import Path
+
+from PySide6.QtCore import QObject, QRunnable, QThread, QThreadPool, Signal, Qt
 from PySide6.QtWidgets import (
     QApplication, QDialog, QDialogButtonBox, QHeaderView, QLabel,
     QMainWindow, QProgressBar, QPushButton, QTableWidget, QTableWidgetItem,
-    QVBoxLayout, QWidget,
+    QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
-from .scanner import Item, ScanCancelled, format_size, scan
+from .scanner import Item, ScanCancelled, allocated_size, format_size, scan
 
 
 def total_bytes(item: Item) -> int | None:
@@ -65,13 +67,47 @@ class ScanThread(QThread):
         self.finished_scan.emit(items, issues)
 
 
+class DirectorySignals(QObject):
+    ready = Signal(object, object, object)
+
+
+class DirectoryJob(QRunnable):
+    """Measure one directory level off the GUI thread."""
+
+    def __init__(self, path: Path):
+        super().__init__()
+        self.path = path
+        self.signals = DirectorySignals()
+
+    def run(self) -> None:
+        children: list[tuple[str, int | None, bool]] = []
+        error = ""
+        try:
+            # Never traverse a symlink, even if it points to a directory.
+            if self.path.is_symlink():
+                raise OSError("Symlink directories are not traversed")
+            for child in sorted(self.path.iterdir(), key=lambda p: p.name):
+                if child.is_symlink():
+                    continue
+                try:
+                    is_dir = child.is_dir()
+                    children.append((child.name, allocated_size(child), is_dir))
+                except OSError:
+                    children.append((child.name, None, False))
+        except OSError as exc:
+            error = str(exc)
+        self.signals.ready.emit(str(self.path), children, error)
+
+
 class DetailDialog(QDialog):
-    """Read-only breakdown of the selected app's user data."""
+    """Explore user data by expanding directories on background workers."""
 
     def __init__(self, item: Item, parent: QWidget | None = None):
         super().__init__(parent)
-        self.setWindowTitle(f"Storage details — {item.app_id}")
-        self.resize(800, 440)
+        self.setWindowTitle(f"Storage explorer — {item.app_id}")
+        self.resize(900, 550)
+        self._pending: set[str] = set()
+        self._jobs: dict[str, DirectoryJob] = {}
         layout = QVBoxLayout(self)
         description = QLabel(
             f"Installed: {format_size(item.allocated_bytes)} | "
@@ -80,37 +116,85 @@ class DetailDialog(QDialog):
         )
         description.setWordWrap(True)
         layout.addWidget(description)
-        self.table = QTableWidget(0, 2)
-        self.table.setHorizontalHeaderLabels(["User data location", "Allocated"])
-        self.table.setAlternatingRowColors(True)
-        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.table.horizontalHeader().setStretchLastSection(False)
-        self.table.horizontalHeader().setSectionResizeMode(
-            0, QHeaderView.ResizeMode.Stretch
+        self.tree = QTreeWidget()
+        self.tree.setHeaderLabels(["User data location", "Allocated"])
+        self.tree.setAlternatingRowColors(True)
+        self.tree.setColumnWidth(0, 660)
+        self.tree.itemExpanded.connect(self.expand_directory)
+        layout.addWidget(self.tree)
+
+        root_path = Path(item.user_data_path)
+        if root_path.is_dir() and not root_path.is_symlink():
+            root = QTreeWidgetItem([str(root_path), format_size(item.user_data_bytes)])
+            root.setData(0, Qt.ItemDataRole.UserRole, str(root_path))
+            self.tree.addTopLevelItem(root)
+            # The first level was already measured during the main scan.
+            for name, size in sorted(
+                item.user_data_breakdown,
+                key=lambda pair: pair[1] if pair[1] is not None else -1,
+                reverse=True,
+            ):
+                path = root_path / name
+                if path.is_symlink():
+                    continue
+                child = QTreeWidgetItem([name, format_size(size)])
+                child.setData(0, Qt.ItemDataRole.UserRole, str(path))
+                root.addChild(child)
+                if path.is_dir():
+                    child.addChild(QTreeWidgetItem(["Expand to scan…", ""]))
+            root.setExpanded(True)
+        else:
+            layout.addWidget(QLabel("No accessible user-data directory."))
+
+        self.status = QLabel(
+            "Expand a folder to measure its contents. Measurements run in "
+            "the background; symlinks are skipped. No files are modified."
         )
-        layout.addWidget(self.table)
-        # Use measurements captured by the background scan. Rewalking large
-        # directories on the UI thread would freeze the window.
-        for name, size in sorted(
-            item.user_data_breakdown,
-            key=lambda pair: (pair[1] is not None, pair[1] or 0),
-            reverse=True,
-        ):
-            row = self.table.rowCount()
-            self.table.insertRow(row)
-            self.table.setItem(
-                row, 0, QTableWidgetItem(f"{item.user_data_path}/{name}")
-            )
-            self.table.setItem(row, 1, SizeCell(size))
-        if not item.user_data_breakdown:
-            layout.addWidget(QLabel("No user-data children found or accessible."))
-        layout.addWidget(QLabel(
-            "Sizes are allocated blocks, not guaranteed reclaimable space. "
-            "No files are modified."
-        ))
+        self.status.setWordWrap(True)
+        layout.addWidget(self.status)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def expand_directory(self, node: QTreeWidgetItem) -> None:
+        path = node.data(0, Qt.ItemDataRole.UserRole)
+        if not path or path in self._pending or node.childCount() != 1:
+            return
+        if node.child(0).data(0, Qt.ItemDataRole.UserRole) is not None:
+            return  # Already populated with actual children.
+        node.child(0).setText(0, "Scanning…")
+        self._pending.add(path)
+        self.status.setText(f"Scanning {path}…")
+        job = DirectoryJob(Path(path))
+        self._jobs[path] = job
+        job.signals.ready.connect(self.directory_ready)
+        QThreadPool.globalInstance().start(job)
+
+    def directory_ready(self, path: str, children: list, error: str) -> None:
+        self._pending.discard(path)
+        self._jobs.pop(path, None)
+        nodes = self.tree.findItems(
+            "*", Qt.MatchFlag.MatchWildcard | Qt.MatchFlag.MatchRecursive, 0
+        )
+        for node in nodes:
+            if node.data(0, Qt.ItemDataRole.UserRole) != path:
+                continue
+            node.takeChildren()
+            for name, size, is_dir in sorted(
+                children, key=lambda entry: entry[1] if entry[1] is not None else -1,
+                reverse=True,
+            ):
+                child_path = str(Path(path) / name)
+                child = QTreeWidgetItem([name, format_size(size)])
+                child.setData(0, Qt.ItemDataRole.UserRole, child_path)
+                node.addChild(child)
+                if is_dir:
+                    child.addChild(QTreeWidgetItem(["Expand to scan…", ""]))
+            break
+        self.status.setText(
+            f"Could not scan {path}: {error}" if error
+            else f"Scanned {path} ({len(children)} entries). Read-only."
+        )
 
 
 class MainWindow(QMainWindow):
