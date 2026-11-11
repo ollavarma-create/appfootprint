@@ -403,9 +403,13 @@ class RuntimeDialog(QDialog):
                                 + (f" ({', '.join(point.conditions)})" if point.conditions else "")
                             )
                 elif compatible_extension(point, item.ref, platform.ref):
+                    possible_apps = direct_runtime_users(platform, items)
+                    app_names = ", ".join(app.app_id for app in possible_apps)
                     matches.append(
                         f"• {platform.ref} — {point.name}"
                         + (f" ({', '.join(point.conditions)})" if point.conditions else "")
+                        + (f"; potential apps: {app_names}" if app_names else
+                           "; no direct application users identified")
                     )
         metadata_heading = QLabel(
             "Compatible installed extensions (metadata)"
