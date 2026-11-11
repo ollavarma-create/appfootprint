@@ -96,3 +96,28 @@ def test_scan_reports_current_item(monkeypatch, tmp_path: Path):
     assert len(items) == 1
     assert not issues
     assert messages == ["Scanning org.example.App (1/1)…"]
+
+
+def test_cancelled_walk_stops_mid_directory(tmp_path: Path):
+    from appfootprint.scanner import ScanCancelled
+    root = tmp_path / "many"
+    root.mkdir()
+    for i in range(10):
+        (root / str(i)).write_bytes(b"hello")
+    checks = 0
+
+    def cancel():
+        nonlocal checks
+        checks += 1
+        return checks >= 3
+
+    with pytest.raises(ScanCancelled):
+        allocated_size(root, cancelled=cancel)
+
+
+def test_scan_cancelled_before_listing(monkeypatch):
+    from appfootprint import scanner
+    monkeypatch.setattr(scanner.shutil, "which", lambda _: "/usr/bin/flatpak")
+    monkeypatch.setattr(scanner, "_list", lambda kind: pytest.fail("listing should not run"))
+    with pytest.raises(scanner.ScanCancelled):
+        scanner.scan(cancelled=lambda: True)
