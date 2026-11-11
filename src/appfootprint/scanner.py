@@ -154,3 +154,26 @@ def format_size(value: int | None) -> str:
             return f"{size:.1f} {unit}"
         size /= 1024
     return "Unknown"
+
+
+def direct_runtime_users(runtime: Item, items: list[Item]) -> list[Item]:
+    """Find apps declaring the same runtime name, architecture and branch.
+
+    Flatpak's --columns=ref output may omit the 'runtime/' type prefix.
+    Installed runtime extensions and indirect dependencies are not inferred.
+    """
+    if runtime.kind != "runtime":
+        return []
+
+    def normalized(ref: str) -> str:
+        return ref.strip().removeprefix("runtime/")
+
+    target = normalized(runtime.ref)
+    if len(target.split("/")) != 3:
+        return []
+    return sorted(
+        (item for item in items
+         if item.kind == "app"
+         and normalized(item.runtime) == target),
+        key=lambda item: item.app_id.casefold(),
+    )

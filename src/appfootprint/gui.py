@@ -10,11 +10,12 @@ from PySide6.QtCore import QObject, QRunnable, QThread, QThreadPool, Signal, Qt,
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication, QDialog, QDialogButtonBox, QHeaderView, QLabel, QMenu,
-    QMainWindow, QProgressBar, QPushButton, QTableWidget, QTableWidgetItem,
+    QMainWindow, QProgressBar, QPushButton, QScrollArea, QTableWidget, QTableWidgetItem,
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
-from .scanner import Item, ScanCancelled, allocated_size, format_size, scan
+from .scanner import Item, ScanCancelled, allocated_size, direct_runtime_users, format_size, scan
+from .advisor import assess_path, space_significance
 
 
 def total_bytes(item: Item) -> int | None:
@@ -147,11 +148,13 @@ class DetailDialog(QDialog):
         self.tree.sortItems(1, Qt.SortOrder.DescendingOrder)
         self.tree.setColumnWidth(0, 660)
         self.tree.itemExpanded.connect(self.expand_directory)
+        self.tree.currentItemChanged.connect(self.show_advice)
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self.show_path_menu)
         layout.addWidget(self.tree)
 
-        root_path = Path(item.user_data_path)
+        self.data_root = Path(item.user_data_path)
+        root_path = self.data_root
         if root_path.is_dir() and not root_path.is_symlink():
             root = directory_item(str(root_path), str(root_path), item.user_data_bytes)
             self._size_cache[str(root_path)] = item.user_data_bytes
@@ -180,9 +183,32 @@ class DetailDialog(QDialog):
         )
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
+        self.advice = QLabel(
+            "Cleanup Advisor (read-only): Select a path to see a conservative assessment."
+        )
+        self.advice.setWordWrap(True)
+        self.advice.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        layout.addWidget(self.advice)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def show_advice(self, node: QTreeWidgetItem | None, _previous) -> None:
+        if node is None:
+            return
+        path = node.data(0, Qt.ItemDataRole.UserRole)
+        if not isinstance(path, str):
+            return
+        result = assess_path(self.data_root, Path(path))
+        size = node.data(1, Qt.ItemDataRole.UserRole)
+        significance = space_significance(size if isinstance(size, int) else None)
+        self.advice.setText(
+            f"Cleanup Advisor — {result.category} ({result.confidence})\n"
+            f"Why: {result.explanation}\n"
+            f"Consequence: {result.consequence}\n"
+            f"Space: {significance} (allocated size, not guaranteed reclaimable)\n"
+            f"Guidance: {result.action} No files are modified."
+        )
 
     def show_path_menu(self, position) -> None:
         """Only offer navigation for real entries, never placeholder rows."""
@@ -267,6 +293,86 @@ class DetailDialog(QDialog):
         )
 
 
+class RuntimeDialog(QDialog):
+    """Explain shared Flatpak runtimes without attributing them to one app."""
+
+    def __init__(self, item: Item, items: list[Item], parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setWindowTitle(f"Shared runtime — {item.app_id}")
+        self.resize(760, 480)
+        layout = QVBoxLayout(self)
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        scroll.setWidget(content)
+        layout.addWidget(scroll, 1)
+        details = (
+            f"Runtime: {item.app_id}\n"
+            f"Ref: {item.ref}\n"
+            f"Installation: {item.installation}\n"
+            f"Measured deployment: {format_size(item.allocated_bytes)}\n"
+            f"Location: {item.location or 'Unknown'}"
+        )
+        info = QLabel(details)
+        info.setWordWrap(True)
+        info.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        content_layout.addWidget(info)
+        explanation = QLabel(
+            "A Flatpak runtime provides shared libraries and components used "
+            "by applications. It does not have an application-specific user-data "
+            "tree, so the Storage Explorer cannot open it as an app.\n\n"
+            "Its measured deployment size is not necessarily unique physical "
+            "disk usage or the space you would recover by removing it. "
+            "Do not remove runtime files manually. Flatpak manages runtime "
+            "dependencies and unused installations."
+        )
+        explanation.setWordWrap(True)
+        content_layout.addWidget(explanation)
+        users = direct_runtime_users(item, items)
+        heading = QLabel(
+            f"Applications using this runtime directly ({len(users)})"
+            if users else "No direct application users found"
+        )
+        heading_font = heading.font()
+        heading_font.setBold(True)
+        heading_font.setPointSize(heading_font.pointSize() + 1)
+        heading.setFont(heading_font)
+        heading.setWordWrap(True)
+        content_layout.addWidget(heading)
+        if users:
+            # Separate selectable entries from the explanatory paragraphs.
+            usage = QLabel("\\n".join(
+                f"• {app.app_id} ({app.installation})" for app in users
+            ))
+        else:
+            usage = QLabel(
+                "No installed applications in this scan declare this exact "
+                "runtime directly. This does not prove it is unused: "
+                "extensions and indirect dependencies are not assessed."
+            )
+        usage.setWordWrap(True)
+        usage.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        content_layout.addWidget(usage)
+        note = QLabel(
+            "Matches use runtime ID, architecture and branch from the "
+            "inventory snapshot. A matching runtime in another installation "
+            "scope may also exist; this list does not establish which "
+            "deployment an application actually loads."
+        )
+        note.setWordWrap(True)
+        content_layout.addWidget(note)
+        if item.errors:
+            errors = QLabel("Scan issues: " + "; ".join(item.errors))
+            errors.setWordWrap(True)
+            content_layout.addWidget(errors)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -277,7 +383,7 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(container)
         self.info = QLabel(
             "Read-only inventory. Totals exclude shared runtimes. "
-            "Double-click an application for user data details."
+            "Double-click an application to explore user data, or a runtime for an explanation."
         )
         self.info.setWordWrap(True)
         layout.addWidget(self.info)
@@ -386,9 +492,12 @@ class MainWindow(QMainWindow):
         if not isinstance(original_index, int):
             return
         item = self.items[original_index]
-        if item.kind != "app":
+        if item.kind == "runtime":
+            dialog = RuntimeDialog(item, self.items, self)
+        elif item.kind == "app":
+            dialog = DetailDialog(item, self)
+        else:
             return
-        dialog = DetailDialog(item, self)
         dialog.exec()
 
 
