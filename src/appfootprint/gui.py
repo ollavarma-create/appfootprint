@@ -293,6 +293,45 @@ class DetailDialog(QDialog):
         )
 
 
+class RuntimeDialog(QDialog):
+    """Explain shared Flatpak runtimes without attributing them to one app."""
+
+    def __init__(self, item: Item, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setWindowTitle(f"Shared runtime — {item.app_id}")
+        self.resize(700, 330)
+        layout = QVBoxLayout(self)
+        details = (
+            f"Runtime: {item.app_id}\\n"
+            f"Ref: {item.ref}\\n"
+            f"Installation: {item.installation}\\n"
+            f"Measured deployment: {format_size(item.allocated_bytes)}\\n"
+            f"Location: {item.location or 'Unknown'}"
+        )
+        info = QLabel(details)
+        info.setWordWrap(True)
+        info.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        layout.addWidget(info)
+        explanation = QLabel(
+            "A Flatpak runtime provides shared libraries and components used "
+            "by applications. It does not have an application-specific user-data "
+            "tree, so the Storage Explorer cannot open it as an app.\\n\\n"
+            "Its measured deployment size is not necessarily unique physical "
+            "disk usage or the space you would recover by removing it. "
+            "Do not remove runtime files manually. Flatpak manages runtime "
+            "dependencies and unused installations."
+        )
+        explanation.setWordWrap(True)
+        layout.addWidget(explanation)
+        if item.errors:
+            errors = QLabel("Scan issues: " + "; ".join(item.errors))
+            errors.setWordWrap(True)
+            layout.addWidget(errors)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -303,7 +342,7 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(container)
         self.info = QLabel(
             "Read-only inventory. Totals exclude shared runtimes. "
-            "Double-click an application for user data details."
+            "Double-click an application to explore user data, or a runtime for an explanation."
         )
         self.info.setWordWrap(True)
         layout.addWidget(self.info)
@@ -412,9 +451,12 @@ class MainWindow(QMainWindow):
         if not isinstance(original_index, int):
             return
         item = self.items[original_index]
-        if item.kind != "app":
+        if item.kind == "runtime":
+            dialog = RuntimeDialog(item, self)
+        elif item.kind == "app":
+            dialog = DetailDialog(item, self)
+        else:
             return
-        dialog = DetailDialog(item, self)
         dialog.exec()
 
 
