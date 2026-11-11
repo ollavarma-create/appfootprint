@@ -386,7 +386,7 @@ class RuntimeDialog(QDialog):
                 elif compatible_extension(point, item.ref, platform.ref):
                     platform_rows.append((platform, point))
 
-        if extension_rows or item.metadata:
+        if extension_rows or (item.metadata and not platform_rows):
             distinct = list(dict.fromkeys(
                 (ref, point.name, point.conditions)
                 for ref, point in extension_rows
