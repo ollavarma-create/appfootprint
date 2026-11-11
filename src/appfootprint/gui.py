@@ -356,7 +356,7 @@ class RuntimeDialog(QDialog):
 
         def navigable(node: QTreeWidgetItem, target: Item, relation: str) -> None:
             node.setData(0, Qt.ItemDataRole.UserRole, target)
-            node.setToolTip(0, f"{target.ref} ({target.installation})\\n{relation}\\nDouble-click to open details")
+            node.setToolTip(0, f"{target.ref} ({target.installation})\n{relation}\nDouble-click to open details")
             node.setToolTip(1, relation)
 
         def show_target(node: QTreeWidgetItem, _column: int) -> None:
