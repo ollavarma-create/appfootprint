@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from .scanner import Item, ScanCancelled, allocated_size, format_size, scan
+from .advisor import assess_path
 
 
 def total_bytes(item: Item) -> int | None:
@@ -147,11 +148,13 @@ class DetailDialog(QDialog):
         self.tree.sortItems(1, Qt.SortOrder.DescendingOrder)
         self.tree.setColumnWidth(0, 660)
         self.tree.itemExpanded.connect(self.expand_directory)
+        self.tree.currentItemChanged.connect(self.show_advice)
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self.show_path_menu)
         layout.addWidget(self.tree)
 
-        root_path = Path(item.user_data_path)
+        self.data_root = Path(item.user_data_path)
+        root_path = self.data_root
         if root_path.is_dir() and not root_path.is_symlink():
             root = directory_item(str(root_path), str(root_path), item.user_data_bytes)
             self._size_cache[str(root_path)] = item.user_data_bytes
@@ -180,9 +183,27 @@ class DetailDialog(QDialog):
         )
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
+        self.advice = QLabel(
+            "Cleanup Advisor (read-only): Select a path to see a conservative assessment."
+        )
+        self.advice.setWordWrap(True)
+        self.advice.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        layout.addWidget(self.advice)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def show_advice(self, node: QTreeWidgetItem | None, _previous) -> None:
+        if node is None:
+            return
+        path = node.data(0, Qt.ItemDataRole.UserRole)
+        if not isinstance(path, str):
+            return
+        result = assess_path(self.data_root, Path(path))
+        self.advice.setText(
+            f"Cleanup Advisor — {result.category} ({result.confidence}): "
+            f"{result.explanation} No files are modified."
+        )
 
     def show_path_menu(self, position) -> None:
         """Only offer navigation for real entries, never placeholder rows."""
