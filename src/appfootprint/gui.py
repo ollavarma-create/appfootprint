@@ -192,18 +192,21 @@ class DetailDialog(QDialog):
         path = node.data(0, Qt.ItemDataRole.UserRole)
         if not isinstance(path, str) or not path:
             return
+        target = Path(path)
+        directory = target if target.is_dir() else target.parent
         menu = QMenu(self.tree)
         copy_action = menu.addAction("Copy path")
+        folder_action = menu.addAction("Copy containing folder path")
         open_action = menu.addAction("Open in file manager")
         selected = menu.exec(self.tree.viewport().mapToGlobal(position))
         if selected == copy_action:
             QApplication.clipboard().setText(path)
             self.status.setText(f"Copied path: {path}")
+        elif selected == folder_action:
+            QApplication.clipboard().setText(str(directory))
+            self.status.setText(f"Copied folder path: {directory}")
         elif selected == open_action:
-            target = Path(path)
-            # QDesktopServices uses the system's default file manager.
-            # For files, open the parent directory instead of executing them.
-            directory = target if target.is_dir() else target.parent
+            # Open the parent of files, never execute them.
             if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(directory))):
                 self.status.setText(f"Could not open file manager: {directory}")
 
