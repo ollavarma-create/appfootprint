@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal, Qt
 from PySide6.QtWidgets import (
@@ -11,7 +10,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-from .scanner import Item, allocated_size, format_size, scan
+from .scanner import Item, format_size, scan
 
 
 def total_bytes(item: Item) -> int | None:
@@ -76,26 +75,21 @@ class DetailDialog(QDialog):
             0, QHeaderView.ResizeMode.Stretch
         )
         layout.addWidget(self.table)
-        data_dir = Path.home() / ".var" / "app" / item.app_id
-        if data_dir.is_dir():
-            try:
-                children = sorted(
-                    data_dir.iterdir(),
-                    key=lambda p: p.name.casefold()
-                )
-                for child in children:
-                    try:
-                        size = allocated_size(child)
-                    except OSError:
-                        size = None
-                    row = self.table.rowCount()
-                    self.table.insertRow(row)
-                    self.table.setItem(row, 0, QTableWidgetItem(str(child)))
-                    self.table.setItem(row, 1, SizeCell(size))
-            except OSError as exc:
-                layout.addWidget(QLabel(f"Could not inspect user data: {exc}"))
-        else:
-            layout.addWidget(QLabel("No per-user Flatpak directory found."))
+        # Use measurements captured by the background scan. Rewalking large
+        # directories on the UI thread would freeze the window.
+        for name, size in sorted(
+            item.user_data_breakdown,
+            key=lambda pair: (pair[1] is not None, pair[1] or 0),
+            reverse=True,
+        ):
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+            self.table.setItem(
+                row, 0, QTableWidgetItem(f"{item.user_data_path}/{name}")
+            )
+            self.table.setItem(row, 1, SizeCell(size))
+        if not item.user_data_breakdown:
+            layout.addWidget(QLabel("No user-data children found or accessible."))
         layout.addWidget(QLabel(
             "Sizes are allocated blocks, not guaranteed reclaimable space. "
             "No files are modified."
