@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from .scanner import Item, ScanCancelled, allocated_size, format_size, scan
-from .advisor import assess_path
+from .advisor import assess_path, space_significance
 
 
 def total_bytes(item: Item) -> int | None:
@@ -200,9 +200,14 @@ class DetailDialog(QDialog):
         if not isinstance(path, str):
             return
         result = assess_path(self.data_root, Path(path))
+        size = node.data(1, Qt.ItemDataRole.UserRole)
+        significance = space_significance(size if isinstance(size, int) else None)
         self.advice.setText(
-            f"Cleanup Advisor — {result.category} ({result.confidence}): "
-            f"{result.explanation} No files are modified."
+            f"Cleanup Advisor — {result.category} ({result.confidence})\\n"
+            f"Why: {result.explanation}\\n"
+            f"Consequence: {result.consequence}\\n"
+            f"Space: {significance} (allocated size, not guaranteed reclaimable)\\n"
+            f"Guidance: {result.action} No files are modified."
         )
 
     def show_path_menu(self, position) -> None:
