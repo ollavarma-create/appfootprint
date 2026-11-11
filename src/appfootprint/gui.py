@@ -10,7 +10,7 @@ from PySide6.QtCore import QObject, QRunnable, QThread, QThreadPool, Signal, Qt,
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication, QDialog, QDialogButtonBox, QHeaderView, QLabel, QMenu,
-    QMainWindow, QProgressBar, QPushButton, QTableWidget, QTableWidgetItem,
+    QMainWindow, QProgressBar, QPushButton, QScrollArea, QTableWidget, QTableWidgetItem,
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
@@ -299,8 +299,16 @@ class RuntimeDialog(QDialog):
     def __init__(self, item: Item, items: list[Item], parent: QWidget | None = None):
         super().__init__(parent)
         self.setWindowTitle(f"Shared runtime — {item.app_id}")
-        self.resize(700, 330)
+        self.resize(760, 480)
         layout = QVBoxLayout(self)
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        scroll.setWidget(content)
+        layout.addWidget(scroll, 1)
         details = (
             f"Runtime: {item.app_id}\n"
             f"Ref: {item.ref}\n"
@@ -311,7 +319,7 @@ class RuntimeDialog(QDialog):
         info = QLabel(details)
         info.setWordWrap(True)
         info.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        layout.addWidget(info)
+        content_layout.addWidget(info)
         explanation = QLabel(
             "A Flatpak runtime provides shared libraries and components used "
             "by applications. It does not have an application-specific user-data "
@@ -322,7 +330,7 @@ class RuntimeDialog(QDialog):
             "dependencies and unused installations."
         )
         explanation.setWordWrap(True)
-        layout.addWidget(explanation)
+        content_layout.addWidget(explanation)
         users = direct_runtime_users(item, items)
         if users:
             apps = "\n".join(
@@ -340,7 +348,7 @@ class RuntimeDialog(QDialog):
             )
         usage.setWordWrap(True)
         usage.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        layout.addWidget(usage)
+        content_layout.addWidget(usage)
         note = QLabel(
             "Matches use runtime ID, architecture and branch from the "
             "inventory snapshot. A matching runtime in another installation "
@@ -348,11 +356,11 @@ class RuntimeDialog(QDialog):
             "deployment an application actually loads."
         )
         note.setWordWrap(True)
-        layout.addWidget(note)
+        content_layout.addWidget(note)
         if item.errors:
             errors = QLabel("Scan issues: " + "; ".join(item.errors))
             errors.setWordWrap(True)
-            layout.addWidget(errors)
+            content_layout.addWidget(errors)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
