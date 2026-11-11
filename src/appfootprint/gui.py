@@ -559,7 +559,7 @@ class NavigationDialog(QDialog):
         prefix = "… › " if len(labels) > 3 else ""
         self.breadcrumb.setText("History: " + prefix + " › ".join(visible))
         self.breadcrumb.setToolTip(
-            "Navigation history (↩ = previously visited component):\\n"
+            "Navigation history (↩ = previously visited component):\n"
             + " › ".join(entry[1] for entry in route)
         )
         self.breadcrumb.setMinimumWidth(0)
