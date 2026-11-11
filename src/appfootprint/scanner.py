@@ -8,6 +8,7 @@ cross-tree totals misleading, so no global physical-use total is claimed.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Callable
 import os
 from pathlib import Path
 import shutil
@@ -79,7 +80,7 @@ def _list(kind: str) -> list[Item]:
     return items
 
 
-def scan() -> tuple[list[Item], list[str]]:
+def scan(progress: Callable[[str], None] | None = None) -> tuple[list[Item], list[str]]:
     if not shutil.which("flatpak"):
         return [], ["Flatpak executable was not found in PATH."]
     issues: list[str] = []
@@ -89,7 +90,9 @@ def scan() -> tuple[list[Item], list[str]]:
             items.extend(_list(kind))
         except (OSError, subprocess.SubprocessError) as exc:
             issues.append(f"Could not list {kind}s: {exc}")
-    for item in items:
+    for index, item in enumerate(items, start=1):
+        if progress is not None:
+            progress(f"Scanning {item.app_id} ({index}/{len(items)})…")
         # Flatpak installations may be named beyond 'user' and 'system'.
         # For these, do not guess an installation scope.
         scope = {"user": "--user", "system": "--system"}.get(item.installation)
