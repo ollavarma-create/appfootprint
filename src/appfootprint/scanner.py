@@ -160,8 +160,8 @@ def direct_runtime_users(runtime: Item, items: list[Item]) -> list[Item]:
     """Find direct app users of an installed runtime from the scan snapshot.
 
     Compare full name/architecture/branch, not just the runtime ID.
-    Installation scopes must match; extensions and indirect dependencies are
-    intentionally not inferred.
+    Applications can use runtimes from a different installation scope.
+    Extensions and indirect dependencies are intentionally not inferred.
     """
     if runtime.kind != "runtime" or not runtime.ref.startswith("runtime/"):
         return []
@@ -169,7 +169,6 @@ def direct_runtime_users(runtime: Item, items: list[Item]) -> list[Item]:
     return sorted(
         (item for item in items
          if item.kind == "app"
-         and item.installation == runtime.installation
          and item.runtime == target),
         key=lambda item: item.app_id.casefold(),
     )
