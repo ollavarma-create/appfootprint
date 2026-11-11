@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
-from .scanner import Item, ScanCancelled, allocated_size, direct_runtime_users, format_size, scan
+from .scanner import Item, ScanCancelled, allocated_size, direct_runtime_users, runtime_extension_hint, format_size, scan
 from .advisor import assess_path, space_significance
 
 
@@ -331,10 +331,22 @@ class RuntimeDialog(QDialog):
         )
         explanation.setWordWrap(True)
         content_layout.addWidget(explanation)
+        extension_hint = runtime_extension_hint(item)
+        if extension_hint:
+            extension_heading = QLabel("Runtime extension — usage not verified")
+            heading_font = extension_heading.font()
+            heading_font.setBold(True)
+            heading_font.setPointSize(heading_font.pointSize() + 1)
+            extension_heading.setFont(heading_font)
+            content_layout.addWidget(extension_heading)
+            extension_details = QLabel(extension_hint)
+            extension_details.setWordWrap(True)
+            content_layout.addWidget(extension_details)
+
         users = direct_runtime_users(item, items)
         heading = QLabel(
-            f"Applications using this runtime directly ({len(users)})"
-            if users else "No direct application users found"
+            f"Applications declaring this primary runtime ({len(users)})"
+            if users else "No primary-runtime matches found"
         )
         heading_font = heading.font()
         heading_font.setBold(True)
@@ -343,15 +355,20 @@ class RuntimeDialog(QDialog):
         heading.setWordWrap(True)
         content_layout.addWidget(heading)
         if users:
-            # Separate selectable entries from the explanatory paragraphs.
-            usage = QLabel("\\n".join(
+            usage = QLabel("\n".join(
                 f"• {app.app_id} ({app.installation})" for app in users
             ))
         else:
             usage = QLabel(
-                "No installed applications in this scan declare this exact "
-                "runtime directly. This does not prove it is unused: "
-                "extensions and indirect dependencies are not assessed."
+                "This inventory found no applications declaring this exact "
+                "reference as their primary runtime. "
+                + (
+                    "That is expected for many runtime extensions; their "
+                    "use is not captured by this comparison."
+                    if extension_hint else
+                    "This does not prove it is unused: extensions and "
+                    "indirect dependencies are not assessed."
+                )
             )
         usage.setWordWrap(True)
         usage.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)

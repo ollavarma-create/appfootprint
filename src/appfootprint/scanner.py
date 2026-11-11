@@ -177,3 +177,37 @@ def direct_runtime_users(runtime: Item, items: list[Item]) -> list[Item]:
          and normalized(item.runtime) == target),
         key=lambda item: item.app_id.casefold(),
     )
+
+
+def runtime_extension_hint(runtime: Item) -> str | None:
+    """Recognize extension families without claiming actual consumers.
+
+    Flatpak runtime extensions are not necessarily listed as applications'
+    --show-runtime values. Naming patterns alone cannot prove use or disuse.
+    """
+    if runtime.kind != "runtime":
+        return None
+    ref = runtime.ref.strip().removeprefix("runtime/")
+    parts = ref.split("/")
+    if len(parts) != 3:
+        return None
+    name, _arch, _branch = parts
+    if name.startswith("org.freedesktop.Platform.GL."):
+        return (
+            "Graphics driver extension (Flatpak GL). Applications can use "
+            "this through their platform's extension points rather than "
+            "declaring it as their primary runtime. The direct-user list "
+            "cannot establish whether it is in use."
+        )
+    if name.startswith("org.freedesktop.Platform.VAAPI."):
+        return (
+            "Video acceleration extension (VA-API). It may be selected "
+            "through a platform extension point; direct runtime matching "
+            "does not establish its usage."
+        )
+    if name.startswith("org.freedesktop.Platform.ffmpeg"):
+        return (
+            "Media codec extension. Its consumers cannot be established "
+            "from the primary runtime field alone."
+        )
+    return None
