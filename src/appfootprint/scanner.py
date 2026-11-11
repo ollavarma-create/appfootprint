@@ -33,6 +33,7 @@ class Item:
     location: str = ""
     allocated_bytes: int | None = None
     runtime: str = ""
+    metadata: str = ""
     user_data_bytes: int | None = None
     user_data_path: str = ""
     user_data_breakdown: list[tuple[str, int | None]] = field(default_factory=list)
@@ -117,6 +118,13 @@ def scan(progress: Callable[[str], None] | None = None,
                                         item.ref).strip()
             if item.location:
                 item.allocated_bytes = allocated_size(Path(item.location), cancelled)
+            if item.kind == "runtime":
+                try:
+                    item.metadata = run_flatpak(
+                        "info", scope, "--show-metadata", item.ref
+                    )
+                except (OSError, subprocess.SubprocessError) as exc:
+                    item.errors.append(f"Extension metadata unavailable: {exc}")
             if item.kind == "app":
                 item.runtime = run_flatpak("info", scope, "--show-runtime",
                                            item.ref).strip()
