@@ -67,6 +67,25 @@ class ScanThread(QThread):
         self.finished_scan.emit(items, issues)
 
 
+class DirectoryTreeItem(QTreeWidgetItem):
+    """Compare numeric allocated sizes when sorting the size column."""
+
+    def __lt__(self, other: QTreeWidgetItem) -> bool:
+        tree = self.treeWidget()
+        if tree is not None and tree.sortColumn() == 1:
+            a = self.data(1, Qt.ItemDataRole.UserRole)
+            b = other.data(1, Qt.ItemDataRole.UserRole)
+            return (a if a is not None else -1) < (b if b is not None else -1)
+        return super().__lt__(other)
+
+
+def directory_item(name: str, path: str, size: int | None) -> DirectoryTreeItem:
+    node = DirectoryTreeItem([name, format_size(size)])
+    node.setData(0, Qt.ItemDataRole.UserRole, path)
+    node.setData(1, Qt.ItemDataRole.UserRole, size)
+    return node
+
+
 class DirectorySignals(QObject):
     ready = Signal(object, object, object)
 
@@ -74,9 +93,10 @@ class DirectorySignals(QObject):
 class DirectoryJob(QRunnable):
     """Measure one directory level off the GUI thread."""
 
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, sizes: dict[str, int | None]):
         super().__init__()
         self.path = path
+        self.sizes = sizes
         self.signals = DirectorySignals()
 
     def run(self) -> None:
@@ -91,7 +111,8 @@ class DirectoryJob(QRunnable):
                     continue
                 try:
                     is_dir = child.is_dir()
-                    children.append((child.name, allocated_size(child), is_dir))
+                    children.append((child.name, self.sizes[str(child)] if str(child) in self.sizes
+                                     else allocated_size(child), is_dir))
                 except OSError:
                     children.append((child.name, None, False))
         except OSError as exc:
@@ -108,6 +129,8 @@ class DetailDialog(QDialog):
         self.resize(900, 550)
         self._pending: set[str] = set()
         self._jobs: dict[str, DirectoryJob] = {}
+        self._size_cache: dict[str, int | None] = {}
+        self._directory_cache: dict[str, list[tuple[str, int | None, bool]]] = {}
         layout = QVBoxLayout(self)
         description = QLabel(
             f"Installed: {format_size(item.allocated_bytes)} | "
@@ -119,14 +142,16 @@ class DetailDialog(QDialog):
         self.tree = QTreeWidget()
         self.tree.setHeaderLabels(["User data location", "Allocated"])
         self.tree.setAlternatingRowColors(True)
+        self.tree.setSortingEnabled(True)
+        self.tree.sortItems(1, Qt.SortOrder.DescendingOrder)
         self.tree.setColumnWidth(0, 660)
         self.tree.itemExpanded.connect(self.expand_directory)
         layout.addWidget(self.tree)
 
         root_path = Path(item.user_data_path)
         if root_path.is_dir() and not root_path.is_symlink():
-            root = QTreeWidgetItem([str(root_path), format_size(item.user_data_bytes)])
-            root.setData(0, Qt.ItemDataRole.UserRole, str(root_path))
+            root = directory_item(str(root_path), str(root_path), item.user_data_bytes)
+            self._size_cache[str(root_path)] = item.user_data_bytes
             self.tree.addTopLevelItem(root)
             # The first level was already measured during the main scan.
             for name, size in sorted(
@@ -137,8 +162,8 @@ class DetailDialog(QDialog):
                 path = root_path / name
                 if path.is_symlink():
                     continue
-                child = QTreeWidgetItem([name, format_size(size)])
-                child.setData(0, Qt.ItemDataRole.UserRole, str(path))
+                child = directory_item(name, str(path), size)
+                self._size_cache[str(path)] = size
                 root.addChild(child)
                 if path.is_dir():
                     child.addChild(QTreeWidgetItem(["Expand to scan…", ""]))
@@ -162,34 +187,50 @@ class DetailDialog(QDialog):
             return
         if node.child(0).data(0, Qt.ItemDataRole.UserRole) is not None:
             return  # Already populated with actual children.
+        if path in self._directory_cache:
+            self.populate_directory(node, path, self._directory_cache[path])
+            self.status.setText(f"Loaded cached results for {path}. Read-only.")
+            return
         node.child(0).setText(0, "Scanning…")
         self._pending.add(path)
         self.status.setText(f"Scanning {path}…")
-        job = DirectoryJob(Path(path))
+        job = DirectoryJob(Path(path), dict(self._size_cache))
         self._jobs[path] = job
         job.signals.ready.connect(self.directory_ready)
         QThreadPool.globalInstance().start(job)
 
+    def populate_directory(
+        self, node: QTreeWidgetItem, path: str,
+        children: list[tuple[str, int | None, bool]],
+    ) -> None:
+        self.tree.setSortingEnabled(False)
+        node.takeChildren()
+        for name, size, is_dir in children:
+            child_path = str(Path(path) / name)
+            child = directory_item(name, child_path, size)
+            node.addChild(child)
+            if is_dir:
+                child.addChild(QTreeWidgetItem(["Expand to scan…", ""]))
+        self.tree.setSortingEnabled(True)
+
     def directory_ready(self, path: str, children: list, error: str) -> None:
         self._pending.discard(path)
         self._jobs.pop(path, None)
+        if not error:
+            self._directory_cache[path] = children
+            for name, size, _is_dir in children:
+                self._size_cache[str(Path(path) / name)] = size
         nodes = self.tree.findItems(
             "*", Qt.MatchFlag.MatchWildcard | Qt.MatchFlag.MatchRecursive, 0
         )
         for node in nodes:
             if node.data(0, Qt.ItemDataRole.UserRole) != path:
                 continue
-            node.takeChildren()
-            for name, size, is_dir in sorted(
-                children, key=lambda entry: entry[1] if entry[1] is not None else -1,
-                reverse=True,
-            ):
-                child_path = str(Path(path) / name)
-                child = QTreeWidgetItem([name, format_size(size)])
-                child.setData(0, Qt.ItemDataRole.UserRole, child_path)
-                node.addChild(child)
-                if is_dir:
-                    child.addChild(QTreeWidgetItem(["Expand to scan…", ""]))
+            if error:
+                node.takeChildren()
+                node.addChild(QTreeWidgetItem(["Scan failed — collapse and retry", ""]))
+            else:
+                self.populate_directory(node, path, children)
             break
         self.status.setText(
             f"Could not scan {path}: {error}" if error
