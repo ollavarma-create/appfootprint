@@ -15,6 +15,15 @@ import shutil
 import subprocess
 
 
+class ScanCancelled(Exception):
+    """The user requested cancellation of a read-only scan."""
+
+
+def check_cancel(cancelled: Callable[[], bool] | None) -> None:
+    if cancelled is not None and cancelled():
+        raise ScanCancelled()
+
+
 @dataclass
 class Item:
     app_id: str
@@ -38,7 +47,7 @@ def run_flatpak(*args: str) -> str:
     return result.stdout
 
 
-def allocated_size(root: Path) -> int:
+def allocated_size(root: Path, cancelled: Callable[[], bool] | None = None) -> int:
     """Count allocated bytes under a directory without following symlinks.
 
     st_blocks is a logical allocation indicator, not a reliable measure of
@@ -50,6 +59,7 @@ def allocated_size(root: Path) -> int:
     seen: set[tuple[int, int]] = set()
     pending = [root]
     while pending:
+        check_cancel(cancelled)
         path = pending.pop()
         stat = path.lstat()
         key = (stat.st_dev, stat.st_ino)
@@ -80,17 +90,20 @@ def _list(kind: str) -> list[Item]:
     return items
 
 
-def scan(progress: Callable[[str], None] | None = None) -> tuple[list[Item], list[str]]:
+def scan(progress: Callable[[str], None] | None = None,
+         cancelled: Callable[[], bool] | None = None) -> tuple[list[Item], list[str]]:
     if not shutil.which("flatpak"):
         return [], ["Flatpak executable was not found in PATH."]
     issues: list[str] = []
     items: list[Item] = []
     for kind in ("app", "runtime"):
+        check_cancel(cancelled)
         try:
             items.extend(_list(kind))
         except (OSError, subprocess.SubprocessError) as exc:
             issues.append(f"Could not list {kind}s: {exc}")
     for index, item in enumerate(items, start=1):
+        check_cancel(cancelled)
         if progress is not None:
             progress(f"Scanning {item.app_id} ({index}/{len(items)})…")
         # Flatpak installations may be named beyond 'user' and 'system'.
@@ -103,7 +116,7 @@ def scan(progress: Callable[[str], None] | None = None) -> tuple[list[Item], lis
             item.location = run_flatpak("info", scope, "--show-location",
                                         item.ref).strip()
             if item.location:
-                item.allocated_bytes = allocated_size(Path(item.location))
+                item.allocated_bytes = allocated_size(Path(item.location), cancelled)
             if item.kind == "app":
                 item.runtime = run_flatpak("info", scope, "--show-runtime",
                                            item.ref).strip()
@@ -114,12 +127,13 @@ def scan(progress: Callable[[str], None] | None = None) -> tuple[list[Item], lis
             item.user_data_path = str(data_dir)
             if data_dir.exists():
                 try:
-                    item.user_data_bytes = allocated_size(data_dir)
+                    item.user_data_bytes = allocated_size(data_dir, cancelled)
                     # Each immediate child is shown separately. These are
                     # directory measurements, not guaranteed reclaimable bytes.
                     for child in sorted(data_dir.iterdir(), key=lambda p: p.name):
+                        check_cancel(cancelled)
                         try:
-                            item.user_data_breakdown.append((child.name, allocated_size(child)))
+                            item.user_data_breakdown.append((child.name, allocated_size(child, cancelled)))
                         except OSError as exc:
                             item.user_data_breakdown.append((child.name, None))
                             item.errors.append(f"Data child {child.name}: {exc}")
@@ -127,6 +141,7 @@ def scan(progress: Callable[[str], None] | None = None) -> tuple[list[Item], lis
                     item.errors.append(f"User data: {exc}")
             else:
                 item.user_data_bytes = 0
+    check_cancel(cancelled)
     return items, issues
 
 
