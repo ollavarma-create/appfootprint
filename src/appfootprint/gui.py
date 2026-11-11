@@ -355,7 +355,7 @@ class RuntimeDialog(QDialog):
         heading.setWordWrap(True)
         content_layout.addWidget(heading)
         if users:
-            usage = QLabel("\\n".join(
+            usage = QLabel("\n".join(
                 f"• {app.app_id} ({app.installation})" for app in users
             ))
         else:
