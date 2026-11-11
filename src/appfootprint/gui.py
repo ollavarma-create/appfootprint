@@ -36,9 +36,9 @@ class MainWindow(QMainWindow):
         self.button = QPushButton("Scan Flatpak installations")
         self.button.clicked.connect(self.start_scan)
         layout.addWidget(self.button)
-        self.table = QTableWidget(0, 7)
+        self.table = QTableWidget(0, 8)
         self.table.setHorizontalHeaderLabels([
-            "Kind", "Application ID", "Installation", "Installed",
+            "Kind", "Application ID", "Ref / version", "Installation", "Installed",
             "User data", "Runtime", "Path / errors",
         ])
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -47,6 +47,7 @@ class MainWindow(QMainWindow):
             QHeaderView.ResizeMode.ResizeToContents
         )
         self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.setWordWrap(False)
         layout.addWidget(self.table)
         self.setCentralWidget(container)
         self.worker: ScanThread | None = None
@@ -65,7 +66,7 @@ class MainWindow(QMainWindow):
         self.table.setRowCount(len(items))
         for row, item in enumerate(items):
             values = [
-                item.kind, item.app_id, item.installation,
+                item.kind, item.app_id, item.ref, item.installation,
                 format_size(item.allocated_bytes),
                 format_size(item.user_data_bytes) if item.kind == "app" else "—",
                 item.runtime if item.kind == "app" else "—",
@@ -74,7 +75,7 @@ class MainWindow(QMainWindow):
             ]
             for col, value in enumerate(values):
                 cell = QTableWidgetItem(value)
-                if col in (3, 4):
+                if col in (4, 5):
                     cell.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 self.table.setItem(row, col, cell)
         summary = f"{len(items)} Flatpak records. No files modified."
