@@ -6,7 +6,7 @@ import sys
 from PySide6.QtCore import QThread, Signal, Qt
 from PySide6.QtWidgets import (
     QApplication, QDialog, QDialogButtonBox, QHeaderView, QLabel,
-    QMainWindow, QPushButton, QTableWidget, QTableWidgetItem,
+    QMainWindow, QProgressBar, QPushButton, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QWidget,
 )
 
@@ -116,6 +116,12 @@ class MainWindow(QMainWindow):
         self.button = QPushButton("Scan Flatpak installations")
         self.button.clicked.connect(self.start_scan)
         layout.addWidget(self.button)
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 0)  # Busy indicator: scan size is unknown.
+        self.progress.setTextVisible(False)
+        self.progress.setAccessibleName("Flatpak scan in progress")
+        self.progress.hide()
+        layout.addWidget(self.progress)
         self.table = QTableWidget(0, 9)
         self.table.setHorizontalHeaderLabels([
             "Kind", "Application ID", "Ref / version", "Installation",
@@ -140,11 +146,18 @@ class MainWindow(QMainWindow):
         if self.worker and self.worker.isRunning():
             return
         self.button.setEnabled(False)
-        self.info.setText("Scanning… (read-only)")
+        self.button.setText("Scanning…")
+        self.progress.show()
+        self.info.setText("Scanning Flatpak applications and user data… (read-only)")
         self.worker = ScanThread(self)
         self.worker.finished_scan.connect(self.show_results)
-        self.worker.finished.connect(lambda: self.button.setEnabled(True))
+        self.worker.finished.connect(self.finish_scan)
         self.worker.start()
+
+    def finish_scan(self) -> None:
+        self.progress.hide()
+        self.button.setText("Scan Flatpak installations")
+        self.button.setEnabled(True)
 
     def show_results(self, items: list[Item], issues: list[str]) -> None:
         self.items = items
