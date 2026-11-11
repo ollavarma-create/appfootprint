@@ -76,3 +76,23 @@ def test_user_data_breakdown_for_system_app(monkeypatch, tmp_path: Path):
     assert items[0].user_data_bytes is not None
     assert any(name == "cache" and size >= 8192
                for name, size in items[0].user_data_breakdown)
+
+
+def test_scan_reports_current_item(monkeypatch, tmp_path: Path):
+    from appfootprint import scanner
+    monkeypatch.setattr(scanner.shutil, "which", lambda _: "/usr/bin/flatpak")
+    monkeypatch.setattr(scanner, "_list", lambda kind: [
+        scanner.Item("org.example.App", "app/org.example.App/x86_64/stable",
+                     "system", "app")
+    ] if kind == "app" else [])
+    deployment = tmp_path / "deployment"
+    deployment.mkdir()
+    monkeypatch.setattr(scanner, "run_flatpak", lambda *args:
+                        str(deployment) if "--show-location" in args
+                        else "org.freedesktop.Platform/x86_64/25.08")
+    monkeypatch.setattr(scanner.Path, "home", lambda: tmp_path)
+    messages = []
+    items, issues = scanner.scan(progress=messages.append)
+    assert len(items) == 1
+    assert not issues
+    assert messages == ["Scanning org.example.App (1/1)…"]
