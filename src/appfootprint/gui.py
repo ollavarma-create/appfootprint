@@ -41,11 +41,12 @@ class SizeCell(QTableWidgetItem):
 
 
 class ScanThread(QThread):
+    progress_changed = Signal(str)
     finished_scan = Signal(object, object)
 
     def run(self) -> None:
         try:
-            items, issues = scan()
+            items, issues = scan(progress=self.progress_changed.emit)
         except Exception as exc:
             items, issues = [], [f"Scan failed: {exc}"]
         self.finished_scan.emit(items, issues)
@@ -150,9 +151,13 @@ class MainWindow(QMainWindow):
         self.progress.show()
         self.info.setText("Scanning Flatpak applications and user data… (read-only)")
         self.worker = ScanThread(self)
+        self.worker.progress_changed.connect(self.show_progress)
         self.worker.finished_scan.connect(self.show_results)
         self.worker.finished.connect(self.finish_scan)
         self.worker.start()
+
+    def show_progress(self, message: str) -> None:
+        self.info.setText(message + " (read-only)")
 
     def finish_scan(self) -> None:
         self.progress.hide()
