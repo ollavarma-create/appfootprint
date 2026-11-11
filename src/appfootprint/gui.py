@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sys
+from threading import Event
 
 from PySide6.QtCore import QThread, Signal, Qt
 from PySide6.QtWidgets import (
@@ -10,7 +11,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-from .scanner import Item, format_size, scan
+from .scanner import Item, ScanCancelled, format_size, scan
 
 
 def total_bytes(item: Item) -> int | None:
@@ -43,10 +44,22 @@ class SizeCell(QTableWidgetItem):
 class ScanThread(QThread):
     progress_changed = Signal(str)
     finished_scan = Signal(object, object)
+    scan_cancelled = Signal()
+
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        self._cancel = Event()
+
+    def cancel(self) -> None:
+        self._cancel.set()
 
     def run(self) -> None:
         try:
-            items, issues = scan(progress=self.progress_changed.emit)
+            items, issues = scan(progress=self.progress_changed.emit,
+                                 cancelled=self._cancel.is_set)
+        except ScanCancelled:
+            self.scan_cancelled.emit()
+            return
         except Exception as exc:
             items, issues = [], [f"Scan failed: {exc}"]
         self.finished_scan.emit(items, issues)
@@ -117,6 +130,10 @@ class MainWindow(QMainWindow):
         self.button = QPushButton("Scan Flatpak installations")
         self.button.clicked.connect(self.start_scan)
         layout.addWidget(self.button)
+        self.cancel_button = QPushButton("Cancel scan")
+        self.cancel_button.clicked.connect(self.cancel_scan)
+        self.cancel_button.hide()
+        layout.addWidget(self.cancel_button)
         self.progress = QProgressBar()
         self.progress.setRange(0, 0)  # Busy indicator: scan size is unknown.
         self.progress.setTextVisible(False)
@@ -148,18 +165,33 @@ class MainWindow(QMainWindow):
             return
         self.button.setEnabled(False)
         self.button.setText("Scanning…")
+        self.cancel_button.setEnabled(True)
+        self.cancel_button.show()
         self.progress.show()
         self.info.setText("Scanning Flatpak applications and user data… (read-only)")
         self.worker = ScanThread(self)
         self.worker.progress_changed.connect(self.show_progress)
         self.worker.finished_scan.connect(self.show_results)
+        self.worker.scan_cancelled.connect(self.scan_was_cancelled)
         self.worker.finished.connect(self.finish_scan)
         self.worker.start()
 
+    def cancel_scan(self) -> None:
+        if self.worker and self.worker.isRunning():
+            self.worker.cancel()
+            self.cancel_button.setEnabled(False)
+            self.info.setText("Cancelling scan… waiting for current operation.")
+
+    def scan_was_cancelled(self) -> None:
+        # Keep the last completed results rather than showing partial data.
+        self.info.setText("Scan cancelled. Previous results retained; no files modified.")
+
     def show_progress(self, message: str) -> None:
-        self.info.setText(message + " (read-only)")
+        if self.worker and not self.worker._cancel.is_set():
+            self.info.setText(message + " (read-only)")
 
     def finish_scan(self) -> None:
+        self.cancel_button.hide()
         self.progress.hide()
         self.button.setText("Scan Flatpak installations")
         self.button.setEnabled(True)
