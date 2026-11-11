@@ -32,3 +32,24 @@ def test_parse_flatpak_list(monkeypatch):
     assert len(items) == 1
     assert items[0].installation == "system"
     assert items[0].app_id == "org.kicad.KiCad"
+
+def test_system_app_user_data_is_scanned(monkeypatch, tmp_path: Path):
+    from appfootprint import scanner
+    monkeypatch.setattr(scanner.shutil, "which", lambda name: "/usr/bin/flatpak")
+    monkeypatch.setattr(scanner, "_list", lambda kind: [
+        scanner.Item("org.example.App", "app/org.example.App/x86_64/stable",
+                     "system", "app")
+    ] if kind == "app" else [])
+    monkeypatch.setattr(scanner, "run_flatpak", lambda *args:
+                        str(tmp_path / "deployment") if "--show-location" in args
+                        else "org.freedesktop.Platform/x86_64/25.08")
+    (tmp_path / "deployment").mkdir()
+    home = tmp_path / "home"
+    data = home / ".var" / "app" / "org.example.App"
+    data.mkdir(parents=True)
+    (data / "cache").write_bytes(b"x" * 8192)
+    monkeypatch.setattr(scanner.Path, "home", lambda: home)
+    items, issues = scanner.scan()
+    assert not issues
+    assert items[0].user_data_bytes is not None
+    assert items[0].user_data_bytes >= 8192
