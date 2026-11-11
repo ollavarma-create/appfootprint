@@ -302,10 +302,10 @@ class RuntimeDialog(QDialog):
         self.resize(700, 330)
         layout = QVBoxLayout(self)
         details = (
-            f"Runtime: {item.app_id}\\n"
-            f"Ref: {item.ref}\\n"
-            f"Installation: {item.installation}\\n"
-            f"Measured deployment: {format_size(item.allocated_bytes)}\\n"
+            f"Runtime: {item.app_id}\n"
+            f"Ref: {item.ref}\n"
+            f"Installation: {item.installation}\n"
+            f"Measured deployment: {format_size(item.allocated_bytes)}\n"
             f"Location: {item.location or 'Unknown'}"
         )
         info = QLabel(details)
@@ -315,7 +315,7 @@ class RuntimeDialog(QDialog):
         explanation = QLabel(
             "A Flatpak runtime provides shared libraries and components used "
             "by applications. It does not have an application-specific user-data "
-            "tree, so the Storage Explorer cannot open it as an app.\\n\\n"
+            "tree, so the Storage Explorer cannot open it as an app.\n\n"
             "Its measured deployment size is not necessarily unique physical "
             "disk usage or the space you would recover by removing it. "
             "Do not remove runtime files manually. Flatpak manages runtime "
