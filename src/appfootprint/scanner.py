@@ -24,6 +24,8 @@ class Item:
     allocated_bytes: int | None = None
     runtime: str = ""
     user_data_bytes: int | None = None
+    user_data_path: str = ""
+    user_data_breakdown: list[tuple[str, int | None]] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
 
@@ -106,9 +108,18 @@ def scan() -> tuple[list[Item], list[str]]:
             item.errors.append(str(exc))
         if item.kind == "app":
             data_dir = Path.home() / ".var" / "app" / item.app_id
+            item.user_data_path = str(data_dir)
             if data_dir.exists():
                 try:
                     item.user_data_bytes = allocated_size(data_dir)
+                    # Each immediate child is shown separately. These are
+                    # directory measurements, not guaranteed reclaimable bytes.
+                    for child in sorted(data_dir.iterdir(), key=lambda p: p.name):
+                        try:
+                            item.user_data_breakdown.append((child.name, allocated_size(child)))
+                        except OSError as exc:
+                            item.user_data_breakdown.append((child.name, None))
+                            item.errors.append(f"Data child {child.name}: {exc}")
                 except OSError as exc:
                     item.errors.append(f"User data: {exc}")
             else:
