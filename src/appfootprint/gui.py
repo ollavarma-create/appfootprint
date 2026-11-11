@@ -1,33 +1,43 @@
-"""Read-only Flatpak inventory and per-application data browser."""
+"""Qt interface for read-only Flatpak storage inventory."""
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal, Qt
 from PySide6.QtWidgets import (
-    QApplication, QDialog, QHeaderView, QLabel, QMainWindow, QPushButton,
-    QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QApplication, QDialog, QDialogButtonBox, QHeaderView, QLabel,
+    QMainWindow, QPushButton, QTableWidget, QTableWidgetItem,
+    QVBoxLayout, QWidget,
 )
 
-from .scanner import Item, format_size, scan
+from .scanner import Item, allocated_size, format_size, scan
 
 
-class SizeItem(QTableWidgetItem):
-    """Sort numeric byte counts, not human-readable size strings."""
+def total_bytes(item: Item) -> int | None:
+    """Known app-specific bytes only; shared runtimes are excluded."""
+    values = (item.allocated_bytes, item.user_data_bytes)
+    if all(value is None for value in values):
+        return None
+    return sum(value or 0 for value in values)
+
+
+class SizeCell(QTableWidgetItem):
+    """Numeric sorting rather than lexicographic sorting of formatted sizes."""
 
     def __init__(self, value: int | None):
         super().__init__(format_size(value))
         self.value = value
-        self.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.setTextAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
         self.setData(Qt.ItemDataRole.UserRole, value)
 
     def __lt__(self, other: QTableWidgetItem) -> bool:
-        if isinstance(other, SizeItem):
-            if self.value is None:
-                return other.value is not None
-            if other.value is None:
-                return False
-            return self.value < other.value
+        if isinstance(other, SizeCell):
+            return (self.value if self.value is not None else -1) < (
+                other.value if other.value is not None else -1
+            )
         return super().__lt__(other)
 
 
@@ -35,43 +45,64 @@ class ScanThread(QThread):
     finished_scan = Signal(object, object)
 
     def run(self) -> None:
-        items, issues = scan()
+        try:
+            items, issues = scan()
+        except Exception as exc:
+            items, issues = [], [f"Scan failed: {exc}"]
         self.finished_scan.emit(items, issues)
 
 
-class DetailsDialog(QDialog):
-    def __init__(self, item: Item, parent: QWidget | None = None) -> None:
+class DetailDialog(QDialog):
+    """Read-only breakdown of the selected app's user data."""
+
+    def __init__(self, item: Item, parent: QWidget | None = None):
         super().__init__(parent)
         self.setWindowTitle(f"Storage details — {item.app_id}")
-        self.resize(800, 470)
+        self.resize(800, 440)
         layout = QVBoxLayout(self)
         description = QLabel(
-            f"<b>{item.app_id}</b><br>"
-            f"Deployment: {format_size(item.allocated_bytes)}<br>"
-            f"User data: {format_size(item.user_data_bytes)}<br>"
-            f"Runtime: {item.runtime or 'Not available'}<br>"
-            "Measurements are allocated blocks, not guaranteed reclaimable space."
+            f"Installed: {format_size(item.allocated_bytes)} | "
+            f"User data: {format_size(item.user_data_bytes)} | "
+            f"Runtime (shared, not included): {item.runtime or 'Unknown'}"
         )
         description.setWordWrap(True)
         layout.addWidget(description)
-        table = QTableWidget(0, 2)
-        table.setHorizontalHeaderLabels(["Data entry", "Allocated"])
-        table.setAlternatingRowColors(True)
-        table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        table.horizontalHeader().setStretchLastSection(True)
-        breakdown = sorted(
-            item.user_data_breakdown,
-            key=lambda pair: pair[1] if pair[1] is not None else -1,
-            reverse=True,
+        self.table = QTableWidget(0, 2)
+        self.table.setHorizontalHeaderLabels(["User data location", "Allocated"])
+        self.table.setAlternatingRowColors(True)
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.horizontalHeader().setStretchLastSection(False)
+        self.table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.Stretch
         )
-        table.setRowCount(len(breakdown))
-        for row, (name, size) in enumerate(breakdown):
-            table.setItem(row, 0, QTableWidgetItem(name))
-            table.setItem(row, 1, SizeItem(size))
-        layout.addWidget(table)
-        note = QLabel(f"Data location: {item.user_data_path or 'Not available'}")
-        note.setWordWrap(True)
-        layout.addWidget(note)
+        layout.addWidget(self.table)
+        data_dir = Path.home() / ".var" / "app" / item.app_id
+        if data_dir.is_dir():
+            try:
+                children = sorted(
+                    data_dir.iterdir(),
+                    key=lambda p: p.name.casefold()
+                )
+                for child in children:
+                    try:
+                        size = allocated_size(child)
+                    except OSError:
+                        size = None
+                    row = self.table.rowCount()
+                    self.table.insertRow(row)
+                    self.table.setItem(row, 0, QTableWidgetItem(str(child)))
+                    self.table.setItem(row, 1, SizeCell(size))
+            except OSError as exc:
+                layout.addWidget(QLabel(f"Could not inspect user data: {exc}"))
+        else:
+            layout.addWidget(QLabel("No per-user Flatpak directory found."))
+        layout.addWidget(QLabel(
+            "Sizes are allocated blocks, not guaranteed reclaimable space. "
+            "No files are modified."
+        ))
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
 
 
 class MainWindow(QMainWindow):
@@ -83,8 +114,8 @@ class MainWindow(QMainWindow):
         container = QWidget()
         layout = QVBoxLayout(container)
         self.info = QLabel(
-            "Read-only inventory. Sizes are allocated blocks, not guaranteed "
-            "reclaimable space. Shared runtimes appear as separate rows."
+            "Read-only inventory. Totals exclude shared runtimes. "
+            "Double-click an application for user data details."
         )
         self.info.setWordWrap(True)
         layout.addWidget(self.info)
@@ -94,18 +125,19 @@ class MainWindow(QMainWindow):
         self.table = QTableWidget(0, 9)
         self.table.setHorizontalHeaderLabels([
             "Kind", "Application ID", "Ref / version", "Installation",
-            "Installed", "User data", "App + data", "Runtime", "Path / errors",
+            "Installed", "User data", "App total", "Runtime", "Path / errors",
         ])
+        # Use the active KDE/Qt palette rather than fixed yellow/green colors.
         self.table.setAlternatingRowColors(True)
         self.table.setSortingEnabled(True)
+        self.table.setWordWrap(False)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.table.setWordWrap(False)
         self.table.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.Interactive
+            QHeaderView.ResizeMode.ResizeToContents
         )
         self.table.horizontalHeader().setStretchLastSection(True)
-        self.table.cellDoubleClicked.connect(self.open_details)
+        self.table.cellDoubleClicked.connect(self.show_detail)
         layout.addWidget(self.table)
         self.setCentralWidget(container)
         self.worker: ScanThread | None = None
@@ -125,42 +157,40 @@ class MainWindow(QMainWindow):
         self.table.setSortingEnabled(False)
         self.table.setRowCount(len(items))
         for row, item in enumerate(items):
-            combined = (
-                item.allocated_bytes + item.user_data_bytes
-                if item.kind == "app"
-                and item.allocated_bytes is not None
-                and item.user_data_bytes is not None
-                else None
-            )
             values = [
                 item.kind, item.app_id, item.ref, item.installation,
                 item.allocated_bytes,
                 item.user_data_bytes if item.kind == "app" else None,
-                combined if item.kind == "app" else None,
+                total_bytes(item) if item.kind == "app" else None,
                 item.runtime if item.kind == "app" else "—",
                 item.location + (" | " if item.location and item.errors else "")
                 + "; ".join(item.errors),
             ]
             for col, value in enumerate(values):
-                cell = SizeItem(value) if col in (4, 5, 6) else QTableWidgetItem(value)
-                if col == 0:
-                    cell.setData(Qt.ItemDataRole.UserRole, row)
+                cell = SizeCell(value) if col in (4, 5, 6) else QTableWidgetItem(str(value))
+                cell.setData(Qt.ItemDataRole.UserRole + 1, row)
                 self.table.setItem(row, col, cell)
         self.table.setSortingEnabled(True)
         self.table.sortItems(6, Qt.SortOrder.DescendingOrder)
-        self.table.resizeColumnsToContents()
         summary = (
-            f"{len(items)} Flatpak records. Double-click a row for details. "
-            "App + data excludes shared runtimes; no files modified."
+            f"{len(items)} Flatpak records. App total = installed + user data; "
+            "shared runtimes excluded. No files modified."
         )
         if issues:
             summary += " Issues: " + "; ".join(issues)
         self.info.setText(summary)
 
-    def open_details(self, row: int, column: int) -> None:
-        index = self.table.item(row, 0).data(Qt.ItemDataRole.UserRole)
-        item = self.items[index]
-        dialog = DetailsDialog(item, self)
+    def show_detail(self, row: int, _column: int) -> None:
+        cell = self.table.item(row, 0)
+        if cell is None:
+            return
+        original_index = cell.data(Qt.ItemDataRole.UserRole + 1)
+        if not isinstance(original_index, int):
+            return
+        item = self.items[original_index]
+        if item.kind != "app":
+            return
+        dialog = DetailDialog(item, self)
         dialog.exec()
 
 
