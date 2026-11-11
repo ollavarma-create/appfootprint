@@ -547,7 +547,7 @@ class NavigationDialog(QDialog):
             self._navigation.entries, self._navigation.position
         )
         self.breadcrumb.setToolTip(
-            "Navigation history (↩ = previously visited component):\\n" + full
+            "Navigation history (↩ = previously visited component):\n" + full
         )
         self.breadcrumb.setMinimumWidth(0)
         self.breadcrumb.setWordWrap(False)
