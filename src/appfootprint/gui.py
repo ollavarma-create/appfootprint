@@ -1011,10 +1011,14 @@ class MainWindow(QMainWindow):
                       record.runtime, record.path, record.provider]
             for col, value in enumerate(values):
                 if col in (4, 5, 6):
-                    cell = (SizeCell(value) if value is not None else
-                            QTableWidgetItem("Not applicable" if
-                                             record.kind != "app" and col in (5, 6)
-                                             else "Unknown"))
+                    # Keep a single item subclass per numeric column. Mixing
+                    # QTableWidgetItem and SizeCell causes Qt's comparison
+                    # dispatch to recurse when sorting missing values.
+                    cell = SizeCell(value)
+                    if value is None:
+                        cell.setText("Not applicable" if
+                                     record.kind != "app" and col in (5, 6)
+                                     else "Unknown")
                 else:
                     cell = QTableWidgetItem(str(value))
                 cell.setData(Qt.ItemDataRole.UserRole + 1, record.index)
