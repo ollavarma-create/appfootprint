@@ -118,7 +118,9 @@ The Snap inventory now reports `/var/lib/snapd/cache` and
 Measurements are allocated file blocks, not automatically reclaimable space.
 Snapshot archives can preserve data from removed applications; neither these
 archives nor cache entries are automatically deleted. Unknown/inaccessible
-paths are not silently counted as zero. GNOME, Mesa and GTK theme Snap
+paths are not silently counted as zero. Protected cache and snapshot paths
+are shown as requiring administrator access; AppFootprint does not elevate
+privileges. Shared Snap components show user data as not applicable. GNOME, Mesa and GTK theme Snap
 families are marked as **inferred** shared content based on their names;
 this is not yet verified from Snap content-interface metadata. Comparing
 rounded `df -h` output before/after uninstall does not establish exactly
