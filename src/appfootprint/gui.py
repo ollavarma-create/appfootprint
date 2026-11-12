@@ -131,6 +131,9 @@ class SnapInventoryDialog(QDialog):
         self.storage_summary = QLabel("Package-manager storage: not measured yet.")
         self.storage_summary.setWordWrap(True)
         layout.addWidget(self.storage_summary)
+        self.coverage = QLabel("Measurement coverage: not assessed yet.")
+        self.coverage.setWordWrap(True)
+        layout.addWidget(self.coverage)
         self.scan_button = QPushButton("Scan Snap installations")
         self.scan_button.clicked.connect(self.start_scan)
         layout.addWidget(self.scan_button)
@@ -241,6 +244,31 @@ class SnapInventoryDialog(QDialog):
         if issues:
             message += " Issues: " + "; ".join(issues)
         self.status.setText(message)
+        # Report coverage independently of totals. Inaccessible paths are
+        # never silently treated as zero or as reclaimable storage.
+        image_measurements = [
+            m for record in records for m in record.measurements
+            if m.role in (StorageRole.DIRECT, StorageRole.SHARED)
+        ]
+        incomplete = (
+            storage is None or
+            any(m.status not in (MeasurementStatus.MEASURED, MeasurementStatus.ABSENT)
+                for m in (storage.cache, storage.snapshots)) or
+            any(m.status not in (MeasurementStatus.MEASURED, MeasurementStatus.ABSENT)
+                for m in image_measurements)
+        )
+        if incomplete:
+            self.coverage.setText(
+                "Partial inventory — some storage could not be measured. "
+                "Installed Snap images may be measured, but protected or "
+                "unavailable storage locations prevent a complete storage total. "
+                "No complete storage total is available."
+            )
+        else:
+            self.coverage.setText(
+                "Measured locations are accessible. This is not a complete "
+                "system-wide disk usage or reclaimable-space estimate."
+            )
         if storage is not None:
             def describe(measurement):
                 if measurement.status == MeasurementStatus.MEASURED:
