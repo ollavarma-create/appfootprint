@@ -30,7 +30,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y patchelf libfuse2 desktop-file-utils imagemagick librsvg2-bin \
+          sudo apt-get install -y patchelf libfuse2 desktop-file-utils appstream \
             libegl1 libgl1 libopengl0 libxkbcommon0 libdbus-1-3 \
             libxcb-cursor0 libxcb-xinerama0 libxcb-icccm4 \
             libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
@@ -45,7 +45,9 @@ jobs:
           "$VIRTUAL_ENV/bin/python" -m pytest -q
           "$VIRTUAL_ENV/bin/python" -m compileall -q src/appfootprint
       - name: Desktop metadata
-        run: desktop-file-validate packaging/appfootprint.desktop
+        run: |
+          desktop-file-validate packaging/appfootprint.desktop
+          appstreamcli validate --no-net packaging/io.github.ollavarma_create.appfootprint.metainfo.xml
       - name: Install appimagetool
         run: |
           curl --fail --location --retry 3 \
