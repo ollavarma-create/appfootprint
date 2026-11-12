@@ -358,6 +358,9 @@ class UserStorageDialog(QDialog):
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setAlternatingRowColors(True)
+        self.table.setSortingEnabled(True)
+        self.table.horizontalHeader().setSortIndicator(
+            3, Qt.SortOrder.DescendingOrder)
         self.table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setStretchLastSection(True)
@@ -412,6 +415,7 @@ class UserStorageDialog(QDialog):
         self.cancel_button.setEnabled(False)
 
     def show_results(self, entries, issues):
+        self.table.setSortingEnabled(False)
         self.table.setRowCount(len(entries))
         for row, entry in enumerate(entries):
             values = [
@@ -421,7 +425,7 @@ class UserStorageDialog(QDialog):
                 if entry.status == "incomplete" else "—",
             ]
             for column, value in enumerate(values):
-                cell = QTableWidgetItem(value)
+                cell = SizeCell(entry.allocated_bytes) if column == 3 else QTableWidgetItem(value)
                 if column == 3:
                     cell.setToolTip(allocated_tooltip(entry.allocated_bytes))
                 elif column == 4 and entry.status == "incomplete":
@@ -430,6 +434,8 @@ class UserStorageDialog(QDialog):
                 elif entry.reason:
                     cell.setToolTip(entry.reason)
                 self.table.setItem(row, column, cell)
+        self.table.setSortingEnabled(True)
+        self.table.sortItems(3, Qt.SortOrder.DescendingOrder)
         incomplete = sum(e.status in ("incomplete", "inaccessible", "error")
                          for e in entries)
         self.status.setText(
