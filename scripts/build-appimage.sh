@@ -14,10 +14,11 @@ python -m nuitka --standalone --enable-plugin=pyside6 \
 test -x build/entrypoint.dist/AppFootprint
 APPDIR="$ROOT/build/AppFootprint.AppDir"
 rm -rf "$APPDIR"
-mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/applications" "$APPDIR/usr/share/icons/hicolor/256x256/apps"
+mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/applications" "$APPDIR/usr/share/metainfo" "$APPDIR/usr/share/icons/hicolor/256x256/apps"
 cp -a build/entrypoint.dist/. "$APPDIR/usr/bin/"
 cp packaging/appfootprint.desktop "$APPDIR/appfootprint.desktop"
 cp packaging/appfootprint.desktop "$APPDIR/usr/share/applications/appfootprint.desktop"
+cp packaging/io.github.ollavarma_create.appfootprint.metainfo.xml "$APPDIR/usr/share/metainfo/"
 cp packaging/AppRun "$APPDIR/AppRun"
 chmod +x "$APPDIR/AppRun"
 # Use the approved PNG artwork directly; no SVG approximation or conversion.
