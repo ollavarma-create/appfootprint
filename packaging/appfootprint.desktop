@@ -5,5 +5,5 @@ Comment=Read-only Linux application storage investigator
 Exec=AppFootprint
 Icon=appfootprint
 Terminal=false
-Categories=Utility;System;
+Categories=System;
 StartupNotify=true
