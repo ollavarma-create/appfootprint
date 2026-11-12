@@ -25,6 +25,7 @@ from .providers.snap import SnapProvider
 from .providers.rpm import RpmProvider
 from .rpm_dependencies import scan_rpm_capabilities
 from .display import provider_title, inventory_column_labels
+from .user_storage import scan_user_storage
 from .unified import combine
 from .overview import flatpak_overview, snap_overview, rpm_overview
 from .providers.snap_storage import scan_storage
@@ -144,6 +145,131 @@ class RpmScanThread(QThread):
         except Exception as exc:
             records, issues = [], [f"RPM scan failed: {exc}"]
         self.finished_scan.emit(records, issues)
+
+
+class UserStorageThread(QThread):
+    progress_changed = Signal(str)
+    loaded = Signal(object, object)
+    cancelled_scan = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._cancel = Event()
+
+    def cancel(self):
+        self._cancel.set()
+
+    def run(self):
+        try:
+            entries, issues = scan_user_storage(
+                cancelled=self._cancel.is_set,
+                progress=self.progress_changed.emit)
+        except ScanCancelled:
+            self.cancelled_scan.emit()
+            return
+        except Exception as exc:
+            entries, issues = [], [f"User storage scan failed: {exc}"]
+        self.loaded.emit(entries, issues)
+
+
+class UserStorageDialog(QDialog):
+    """Separate XDG observations; intentionally not added to provider totals."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("User Storage — read-only XDG inventory")
+        self.resize(880, 440)
+        layout = QVBoxLayout(self)
+        note = QLabel(
+            "Independent allocated-byte observations. Flatpak user data may overlap; "
+            "do not add these values to provider totals. On Btrfs, reported bytes "
+            "are not guaranteed physical or reclaimable space. No deletion.")
+        note.setWordWrap(True)
+        layout.addWidget(note)
+        self.status = QLabel("Not scanned")
+        layout.addWidget(self.status)
+        self.table = QTableWidget(0, 5)
+        self.table.setHorizontalHeaderLabels(
+            ["Category", "Path", "Status", "Allocated", "Known subtotal"])
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setAlternatingRowColors(True)
+        self.table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setStretchLastSection(True)
+        layout.addWidget(self.table)
+        controls = QHBoxLayout()
+        self.scan_button = QPushButton("Scan user storage")
+        self.scan_button.clicked.connect(self.start_scan)
+        controls.addWidget(self.scan_button)
+        self.cancel_button = QPushButton("Cancel")
+        self.cancel_button.clicked.connect(self.cancel_scan)
+        self.cancel_button.setEnabled(False)
+        controls.addWidget(self.cancel_button)
+        controls.addStretch()
+        close = QPushButton("Close")
+        close.clicked.connect(self.reject)
+        controls.addWidget(close)
+        layout.addLayout(controls)
+        self.worker = None
+
+    def start_scan(self):
+        if self.worker is not None and self.worker.isRunning():
+            return
+        self.scan_button.setEnabled(False)
+        self.cancel_button.setEnabled(True)
+        self.status.setText("Scanning XDG directories…")
+        self.worker = UserStorageThread(self)
+        self.worker.progress_changed.connect(self.status.setText)
+        self.worker.loaded.connect(self.show_results)
+        self.worker.cancelled_scan.connect(
+            lambda: self.status.setText("Scan cancelled; previous results retained"))
+        self.worker.finished.connect(self.finish_scan)
+        self.worker.start()
+
+    def cancel_scan(self):
+        if self.worker is not None and self.worker.isRunning():
+            self.worker.cancel()
+            self.cancel_button.setEnabled(False)
+            self.status.setText("Cancelling…")
+
+    def finish_scan(self):
+        self.scan_button.setEnabled(True)
+        self.cancel_button.setEnabled(False)
+
+    def show_results(self, entries, issues):
+        self.table.setRowCount(len(entries))
+        for row, entry in enumerate(entries):
+            values = [
+                entry.label, entry.path, entry.status,
+                format_size(entry.allocated_bytes),
+                format_size(entry.known_allocated_bytes)
+                if entry.status == "incomplete" else "—",
+            ]
+            for column, value in enumerate(values):
+                cell = QTableWidgetItem(value)
+                if entry.reason:
+                    cell.setToolTip(entry.reason)
+                self.table.setItem(row, column, cell)
+        incomplete = sum(e.status in ("incomplete", "inaccessible", "error")
+                         for e in entries)
+        self.status.setText(
+            f"{len(entries)} directories · {incomplete} incomplete/unknown"
+            + (f" · {'; '.join(issues)}" if issues else ""))
+
+    def reject(self):
+        if self.worker is not None and self.worker.isRunning():
+            self.cancel_scan()
+            self.status.setText("Waiting for cancellation before closing…")
+            return
+        super().reject()
+
+    def closeEvent(self, event):
+        if self.worker is not None and self.worker.isRunning():
+            self.cancel_scan()
+            event.ignore()
+            return
+        super().closeEvent(event)
 
 
 class RpmDependencyThread(QThread):
@@ -1129,6 +1255,9 @@ class MainWindow(QMainWindow):
         self.kind_filter.currentIndexChanged.connect(self.apply_filters)
         filters.addWidget(self.kind_filter)
         filters.addStretch()
+        self.user_storage_button = QPushButton("User Storage…")
+        self.user_storage_button.clicked.connect(self.open_user_storage)
+        filters.addWidget(self.user_storage_button)
         layout.addLayout(filters)
         self.cancel_button = QPushButton("Cancel scan")
         self.cancel_button.clicked.connect(self.cancel_scan)
@@ -1163,6 +1292,9 @@ class MainWindow(QMainWindow):
         self.probe = ProviderProbeThread(self)
         self.probe.detected.connect(self.providers_detected)
         self.probe.start()
+
+    def open_user_storage(self):
+        UserStorageDialog(self).exec()
 
     @staticmethod
     def _create_provider_card(provider, overview, button, status):
