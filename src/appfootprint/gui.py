@@ -26,6 +26,7 @@ from .providers.rpm import RpmProvider
 from .rpm_dependencies import scan_rpm_capabilities
 from .display import provider_title, inventory_column_labels
 from .user_storage import scan_user_storage
+from .storage_investigator import investigate, inspection_commands
 from .unified import combine
 from .overview import flatpak_overview, snap_overview, rpm_overview
 from .providers.snap_storage import scan_storage
@@ -172,6 +173,162 @@ class UserStorageThread(QThread):
         self.loaded.emit(entries, issues)
 
 
+class InvestigationThread(QThread):
+    progress_changed = Signal(str)
+    loaded = Signal(object, object)
+    cancelled_scan = Signal()
+
+    def __init__(self, root, parent=None):
+        super().__init__(parent)
+        self.root = root
+        self._cancel = Event()
+
+    def cancel(self):
+        self._cancel.set()
+
+    def run(self):
+        try:
+            result = investigate(
+                self.root, cancelled=self._cancel.is_set,
+                progress=self.progress_changed.emit)
+        except ScanCancelled:
+            self.cancelled_scan.emit()
+            return
+        except Exception as exc:
+            self.loaded.emit(None, str(exc))
+            return
+        self.loaded.emit(result, None)
+
+
+class StorageInvestigatorDialog(QDialog):
+    """Read-only per-root breakdown with copy-only inspection commands."""
+
+    def __init__(self, root, parent=None):
+        super().__init__(parent)
+        self.root = root
+        self.setWindowTitle("Storage Investigator — " + str(root))
+        self.resize(980, 580)
+        layout = QVBoxLayout(self)
+        self.note = QLabel(
+            "Read-only allocated bytes. Each child is measured independently; "
+            "hardlinks and Btrfs shared extents can overlap. No cleanup advice "
+            "or reclaimable-space estimate. No commands are executed.")
+        self.note.setWordWrap(True)
+        layout.addWidget(self.note)
+        self.status = QLabel("Not scanned")
+        layout.addWidget(self.status)
+        self.table = QTableWidget(0, 5)
+        self.table.setHorizontalHeaderLabels(
+            ["Name", "Allocated", "Status", "Known subtotal", "Path"])
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setAlternatingRowColors(True)
+        self.table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.itemSelectionChanged.connect(self.show_commands)
+        layout.addWidget(self.table)
+        layout.addWidget(QLabel("Inspection examples (copy only; no execution):"))
+        self.commands = QLabel("Select a row to see inspection commands")
+        self.commands.setWordWrap(True)
+        self.commands.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        layout.addWidget(self.commands)
+        controls = QHBoxLayout()
+        self.scan_button = QPushButton("Scan subdirectories")
+        self.scan_button.clicked.connect(self.start_scan)
+        controls.addWidget(self.scan_button)
+        self.cancel_button = QPushButton("Cancel")
+        self.cancel_button.setEnabled(False)
+        self.cancel_button.clicked.connect(self.cancel_scan)
+        controls.addWidget(self.cancel_button)
+        self.copy_button = QPushButton("Copy inspection commands")
+        self.copy_button.setEnabled(False)
+        self.copy_button.clicked.connect(self.copy_commands)
+        controls.addWidget(self.copy_button)
+        controls.addStretch()
+        close = QPushButton("Close")
+        close.clicked.connect(self.reject)
+        controls.addWidget(close)
+        layout.addLayout(controls)
+        self.worker = None
+        self.start_scan()
+
+    def start_scan(self):
+        if self.worker is not None and self.worker.isRunning():
+            return
+        self.scan_button.setEnabled(False)
+        self.cancel_button.setEnabled(True)
+        self.status.setText("Scanning…")
+        self.worker = InvestigationThread(self.root, self)
+        self.worker.progress_changed.connect(self.status.setText)
+        self.worker.loaded.connect(self.show_results)
+        self.worker.cancelled_scan.connect(
+            lambda: self.status.setText("Cancelled; previous results retained"))
+        self.worker.finished.connect(self.finish_scan)
+        self.worker.start()
+
+    def finish_scan(self):
+        self.scan_button.setEnabled(True)
+        self.cancel_button.setEnabled(False)
+
+    def cancel_scan(self):
+        if self.worker is not None and self.worker.isRunning():
+            self.worker.cancel()
+            self.cancel_button.setEnabled(False)
+            self.status.setText("Cancelling…")
+
+    def show_results(self, result, error):
+        if error:
+            self.status.setText("Investigation failed: " + error)
+            return
+        self.table.setRowCount(len(result.children))
+        for row, entry in enumerate(result.children):
+            values = [
+                entry.label, format_size(entry.allocated_bytes), entry.status,
+                format_size(entry.known_allocated_bytes)
+                if entry.status == "incomplete" else "—", entry.path]
+            for col, value in enumerate(values):
+                item = QTableWidgetItem(value)
+                if entry.reason:
+                    item.setToolTip(entry.reason)
+                self.table.setItem(row, col, item)
+        unknown = sum(e.allocated_bytes is None for e in result.children)
+        self.status.setText(
+            f"{len(result.children)} immediate children · {unknown} unknown/incomplete")
+
+    def selected_commands(self):
+        row = self.table.currentRow()
+        if row < 0:
+            return ()
+        item = self.table.item(row, 4)
+        return inspection_commands(item.text()) if item is not None else ()
+
+    def show_commands(self):
+        commands = self.selected_commands()
+        self.commands.setText("\\n".join(commands) if commands else
+                              "Select a row to see inspection commands")
+        self.copy_button.setEnabled(bool(commands))
+
+    def copy_commands(self):
+        commands = self.selected_commands()
+        if commands:
+            QApplication.clipboard().setText("\\n".join(commands))
+
+    def reject(self):
+        if self.worker is not None and self.worker.isRunning():
+            self.cancel_scan()
+            self.status.setText("Waiting for cancellation before closing…")
+            return
+        super().reject()
+
+    def closeEvent(self, event):
+        if self.worker is not None and self.worker.isRunning():
+            self.cancel_scan()
+            event.ignore()
+            return
+        super().closeEvent(event)
+
+
 class UserStorageDialog(QDialog):
     """Separate XDG observations; intentionally not added to provider totals."""
 
@@ -198,6 +355,9 @@ class UserStorageDialog(QDialog):
             QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setStretchLastSection(True)
         layout.addWidget(self.table)
+        self.table.cellDoubleClicked.connect(self.open_investigator)
+        hint = QLabel("Double-click a measured directory to inspect its immediate children.")
+        layout.addWidget(hint)
         controls = QHBoxLayout()
         self.scan_button = QPushButton("Scan user storage")
         self.scan_button.clicked.connect(self.start_scan)
@@ -212,6 +372,13 @@ class UserStorageDialog(QDialog):
         controls.addWidget(close)
         layout.addLayout(controls)
         self.worker = None
+
+    def open_investigator(self, row, _column):
+        status = self.table.item(row, 2)
+        path = self.table.item(row, 1)
+        if status is None or path is None or status.text() != "measured":
+            return
+        StorageInvestigatorDialog(Path(path.text()), self).exec()
 
     def start_scan(self):
         if self.worker is not None and self.worker.isRunning():
