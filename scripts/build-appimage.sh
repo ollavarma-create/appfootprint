@@ -25,7 +25,7 @@ cp packaging/AppRun "$APPDIR/AppRun"
 chmod +x "$APPDIR/AppRun"
 # AppImage desktop metadata requires a root PNG icon matching Icon=appfootprint.
 # Convert checked-in scalable SVG to PNG on the build host.
-convert -background none assets/appfootprint.svg -resize 256x256 "$APPDIR/appfootprint.png"
+rsvg-convert --width 256 --height 256 --output "$APPDIR/appfootprint.png" assets/appfootprint.svg
 cp "$APPDIR/appfootprint.png" "$APPDIR/usr/share/icons/hicolor/256x256/apps/appfootprint.png"
 ARCH=x86_64 appimagetool "$APPDIR" "$ROOT/dist/AppFootprint-x86_64.AppImage"
 chmod +x dist/AppFootprint-x86_64.AppImage
