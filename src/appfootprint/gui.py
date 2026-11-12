@@ -21,6 +21,7 @@ from .scanner import Item, ScanCancelled, allocated_size, direct_runtime_users, 
 from .advisor import assess_path, space_significance
 from .provider_detection import ProviderStatus, detect_providers
 from .providers.snap import SnapProvider
+from .providers.snap_storage import scan_storage
 from .inventory import StorageRole, MeasurementStatus
 
 
@@ -91,7 +92,7 @@ class ProviderProbeThread(QThread):
 
 class SnapScanThread(QThread):
     progress_changed = Signal(str)
-    finished_scan = Signal(object, object)
+    finished_scan = Signal(object, object, object)
     scan_cancelled = Signal()
 
     def __init__(self, parent=None):
@@ -105,12 +106,14 @@ class SnapScanThread(QThread):
         try:
             records, issues = SnapProvider().scan(
                 progress=self.progress_changed.emit, cancelled=self._cancel.is_set)
+            self.progress_changed.emit('Measuring Snap cache and snapshots…')
+            storage = scan_storage(cancelled=self._cancel.is_set)
         except ScanCancelled:
             self.scan_cancelled.emit()
             return
         except Exception as exc:
-            records, issues = [], [f"Snap scan failed: {exc}"]
-        self.finished_scan.emit(records, issues)
+            records, issues, storage = [], [f"Snap scan failed: {exc}"], None
+        self.finished_scan.emit(records, issues, storage)
 
 
 class SnapInventoryDialog(QDialog):
@@ -125,6 +128,9 @@ class SnapInventoryDialog(QDialog):
         self.status = QLabel("Ready to scan Snap revisions (read-only).")
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
+        self.storage_summary = QLabel("Package-manager storage: not measured yet.")
+        self.storage_summary.setWordWrap(True)
+        layout.addWidget(self.storage_summary)
         self.scan_button = QPushButton("Scan Snap installations")
         self.scan_button.clicked.connect(self.start_scan)
         layout.addWidget(self.scan_button)
@@ -197,7 +203,7 @@ class SnapInventoryDialog(QDialog):
         self.cancel_button.hide()
         self.scan_button.setEnabled(True)
 
-    def show_results(self, records, issues):
+    def show_results(self, records, issues, storage=None):
         self.records = records
         self.table.setSortingEnabled(False)
         self.table.setRowCount(len(records))
@@ -232,6 +238,21 @@ class SnapInventoryDialog(QDialog):
         if issues:
             message += " Issues: " + "; ".join(issues)
         self.status.setText(message)
+        if storage is not None:
+            def describe(measurement):
+                if measurement.status == MeasurementStatus.MEASURED:
+                    return format_size(measurement.allocated_bytes)
+                if measurement.status == MeasurementStatus.ABSENT:
+                    return "Absent"
+                return f"Unknown ({measurement.status.value}: {measurement.reason})"
+            self.storage_summary.setText(
+                f"Package-manager storage (separate from installed images): "
+                f"Cache {describe(storage.cache)} | "
+                f"Snapshots {describe(storage.snapshots)}. "
+                "These are not per-app sizes or necessarily reclaimable."
+            )
+        else:
+            self.storage_summary.setText("Package-manager storage: not measured.")
 
 
 class DirectoryTreeItem(QTreeWidgetItem):
