@@ -27,6 +27,18 @@ Initial testing targets Fedora KDE. Other Linux desktops are welcome, but are no
 
 Flatpak and Snap are optional at runtime. The UI detects which implemented providers are available. Neither package manager is required to run the unit tests.
 
+## AppImage (experimental alpha)
+
+The GitHub Actions **AppImage build (experimental)** workflow produces an x86_64 AppImage and a matching SHA256 checksum. Download both files from the workflow run's artifacts. Verify the checksum from the same directory before running:
+
+```bash
+sha256sum -c AppFootprint-x86_64.AppImage.sha256
+chmod +x AppFootprint-x86_64.AppImage
+./AppFootprint-x86_64.AppImage
+```
+
+The AppImage has been manually tested on Fedora KDE, but is not yet validated across Linux distributions. It runs without administrator privileges and never deletes application data. The first public pre-release is planned; a workflow artifact is **not** itself a GitHub Release.
+
 ## Install and run from source
 
 In a terminal:
