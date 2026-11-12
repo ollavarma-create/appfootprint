@@ -60,7 +60,7 @@ def probe_snap(timeout: float = 3.0) -> ProviderStatus:
     except (OSError, subprocess.SubprocessError) as exc:
         return ProviderStatus("snap", False, f"Snap unavailable: {exc}")
     return ProviderStatus("snap", True, "Snap inventory available.",
-                          version[0] if version else "Snap")
+                          " ".join(version[0].split()) if version else "Snap")
 
 
 def probe_rpm(timeout: float = 3.0) -> ProviderStatus:
