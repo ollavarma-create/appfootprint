@@ -305,14 +305,14 @@ class StorageInvestigatorDialog(QDialog):
 
     def show_commands(self):
         commands = self.selected_commands()
-        self.commands.setText("\\n".join(commands) if commands else
+        self.commands.setText("\n".join(commands) if commands else
                               "Select a row to see inspection commands")
         self.copy_button.setEnabled(bool(commands))
 
     def copy_commands(self):
         commands = self.selected_commands()
         if commands:
-            QApplication.clipboard().setText("\\n".join(commands))
+            QApplication.clipboard().setText("\n".join(commands))
 
     def reject(self):
         if self.worker is not None and self.worker.isRunning():
