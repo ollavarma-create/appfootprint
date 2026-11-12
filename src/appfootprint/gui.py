@@ -299,10 +299,19 @@ class StorageInvestigatorDialog(QDialog):
             self.cancel_button.setEnabled(False)
             self.status.setText("Cancelling…")
 
+    def clear_selection_preview(self):
+        """Discard commands belonging to a previous directory or selection."""
+        self.table.clearSelection()
+        self.table.setCurrentCell(-1, -1)
+        self.commands.setText("Select a row to see inspection commands")
+        self.copy_button.setEnabled(False)
+        self.copy_path_button.setEnabled(False)
+
     def show_results(self, result, error):
         if error:
             self.status.setText("Investigation failed: " + error)
             return
+        self.clear_selection_preview()
         self.table.setRowCount(len(result.children))
         for row, entry in enumerate(result.children):
             values = [
@@ -355,6 +364,8 @@ class StorageInvestigatorDialog(QDialog):
             self.status.setText("Cannot navigate: not a real directory within XDG storage")
             return
         self.history.visit(path)
+        self.clear_selection_preview()
+        self.table.setRowCount(0)
         self.update_navigation()
         self.start_scan()
 
@@ -368,6 +379,8 @@ class StorageInvestigatorDialog(QDialog):
             return
         if self.history.can_back:
             self.history.back()
+            self.clear_selection_preview()
+            self.table.setRowCount(0)
             self.update_navigation()
             self.start_scan()
 
@@ -376,6 +389,8 @@ class StorageInvestigatorDialog(QDialog):
             return
         if self.history.can_forward:
             self.history.forward()
+            self.clear_selection_preview()
+            self.table.setRowCount(0)
             self.update_navigation()
             self.start_scan()
 
