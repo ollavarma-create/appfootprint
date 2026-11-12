@@ -199,3 +199,116 @@ read-only policy, measurement caveats, and (for Snap) cache/snapshot access
 limitations. The same button has a hover tooltip. This replaces the three
 long explanatory lines above the overview; scan progress and issue state
 remain visible in the cards. The shared bar legend stays visible.
+
+### Experimental RPM inventory foundation (PR #18)
+
+The new `appfootprint.providers.rpm.RpmProvider` is a **read-only,
+non-GUI** foundation for the next provider. It runs a single
+`rpm -qa --queryformat` query and obtains installed package identities and
+RPM-owned file paths from the local database. It then uses `lstat()` and
+`st_blocks * 512` for regular files and symlinks, without traversing
+directories or symlink targets. Directory entries are excluded to avoid
+attributing directory contents to multiple packages.
+
+RPM package classification is **OTHER / unclassified** by default. Package
+identities are provider-specific and must not be merged with Snap or Flatpak
+names. When a file is missing, unreadable, or its path/inode is shared across
+packages, the affected package measurement is marked **incomplete** and its
+size is **unknown**. The known-byte subtotal and measured/missing/inaccessible/
+ambiguous file counts are retained as metadata, but must not be presented
+as the complete package size. These are allocated block indicators, **not
+reclaimable or deduplicated physical bytes**; Btrfs reflinks and snapshots
+cannot be resolved using `st_blocks` alone. User data is not attributed to
+RPM packages.
+
+No RPM UI card, DNF operation, removal, administrator escalation or
+filesystem modification is part of PR #18. The provider is deliberately
+isolated for synthetic tests and empirical Fedora validation before
+integration in PR #19. Run `pytest -q` and optionally inspect results
+without changing the system:
+
+```bash
+python - <<'PY'
+from appfootprint.providers.rpm import RpmProvider
+records, issues = RpmProvider().scan()
+print("RPM packages:", len(records), "issues:", issues)
+print("Incomplete packages:", sum(bool(r.issues) for r in records))
+for r in records[:5]:
+    print(r.identifier, r.reference, r.measurements[0].status.value,
+          r.metadata["known_allocated_bytes"], r.issues)
+PY
+```
+
+### RPM ownership diagnostics (PR #18 refinement)
+
+The previous `ambiguous_files` count is now split into two mutually
+exclusive categories:
+
+- `multi_owned_paths`: the exact path is listed by multiple RPM packages;
+- `shared_inode_paths`: a path has one RPM owner, but another distinct
+  path refers to the same device/inode (hardlink).
+
+When both conditions hold, the path is classified as multi-owned. The
+legacy `ambiguous_files` field remains the sum of these two counts for
+compatibility. Both remain **unknown** for per-package complete-byte
+accounting; no bytes are assigned to an arbitrary owner. Missing files
+are still reported as `absent_files`. The scanner does not yet distinguish
+RPM `%ghost` entries from ordinary missing files; this requires
+additional RPM file-flag metadata and is deferred rather than guessed.
+
+To compare the new categories on Fedora:
+
+```bash
+python - <<'PY'
+from collections import Counter
+from appfootprint.providers.rpm import RpmProvider
+
+records, issues = RpmProvider().scan()
+totals = Counter()
+for record in records:
+    for field in ("multi_owned_paths", "shared_inode_paths",
+                  "absent_files", "inaccessible_files"):
+        totals[field] += int(record.metadata[field])
+print("Packages:", len(records), "issues:", issues)
+for field, count in totals.items():
+    print(field, count)
+PY
+```
+
+### RPM hardlink attribution (PR #18 refinement)
+
+RPM file-path ownership and inode identity are evaluated separately. A
+hardlinked inode referenced by paths owned **only by one RPM package** is
+counted **once** for that package. Subsequent same-package links are
+tracked in `internal_hardlink_paths`, and do not make the package
+measurement incomplete. An inode referenced by paths belonging to
+**different packages** is not assigned to either package: those paths
+remain unknown in `cross_package_hardlink_paths` and the existing
+`shared_inode_paths` counter. Exact multi-owned paths take precedence
+over inode-sharing classification.
+
+The resulting counts describe path occurrences, not distinct inodes or
+recoverable bytes. RPM file absence and permission limitations are
+unchanged. On Btrfs, reflink sharing remains undetectable with inode
+identity alone.
+
+To inspect the refined diagnostic counts, run:
+
+```bash
+python - <<'PY'
+from collections import Counter
+from appfootprint.providers.rpm import RpmProvider
+
+records, issues = RpmProvider().scan()
+fields = ("internal_hardlink_paths", "cross_package_hardlink_paths",
+          "multi_owned_paths", "absent_files", "inaccessible_files")
+counts = Counter()
+for record in records:
+    for field in fields:
+        counts[field] += int(record.metadata[field])
+print("Packages:", len(records), "Incomplete:", sum(bool(r.issues) for r in records))
+print("Issues:", issues)
+for field in fields:
+    print(field, counts[field])
+PY
+```
