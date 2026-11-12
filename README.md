@@ -238,3 +238,39 @@ for r in records[:5]:
           r.metadata["known_allocated_bytes"], r.issues)
 PY
 ```
+
+### RPM ownership diagnostics (PR #18 refinement)
+
+The previous `ambiguous_files` count is now split into two mutually
+exclusive categories:
+
+- `multi_owned_paths`: the exact path is listed by multiple RPM packages;
+- `shared_inode_paths`: a path has one RPM owner, but another distinct
+  path refers to the same device/inode (hardlink).
+
+When both conditions hold, the path is classified as multi-owned. The
+legacy `ambiguous_files` field remains the sum of these two counts for
+compatibility. Both remain **unknown** for per-package complete-byte
+accounting; no bytes are assigned to an arbitrary owner. Missing files
+are still reported as `absent_files`. The scanner does not yet distinguish
+RPM `%ghost` entries from ordinary missing files; this requires
+additional RPM file-flag metadata and is deferred rather than guessed.
+
+To compare the new categories on Fedora:
+
+```bash
+python - <<'PY'
+from collections import Counter
+from appfootprint.providers.rpm import RpmProvider
+
+records, issues = RpmProvider().scan()
+totals = Counter()
+for record in records:
+    for field in ("multi_owned_paths", "shared_inode_paths",
+                  "absent_files", "inaccessible_files"):
+        totals[field] += int(record.metadata[field])
+print("Packages:", len(records), "issues:", issues)
+for field, count in totals.items():
+    print(field, count)
+PY
+```
