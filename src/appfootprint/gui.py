@@ -11,7 +11,7 @@ from collections.abc import Callable
 from PySide6.QtCore import QObject, QRunnable, QThread, QThreadPool, Signal, Qt, QUrl
 from PySide6.QtGui import QDesktopServices, QColor, QPixmap, QIcon
 from PySide6.QtWidgets import (
-    QApplication, QDialog, QDialogButtonBox, QHeaderView, QLabel, QMenu,
+    QApplication, QDialog, QDialogButtonBox, QHeaderView, QLabel, QMenu, QFrame, QGroupBox,
     QMainWindow, QProgressBar, QPushButton, QScrollArea, QStackedWidget, QHBoxLayout, QComboBox, QTableWidget, QTableWidgetItem,
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
@@ -23,6 +23,7 @@ from .advisor import assess_path, space_significance
 from .provider_detection import ProviderStatus, detect_providers
 from .providers.snap import SnapProvider
 from .unified import combine
+from .overview import flatpak_overview, snap_overview
 from .providers.snap_storage import scan_storage
 from .inventory import StorageRole, MeasurementStatus
 
@@ -792,6 +793,69 @@ class NavigationDialog(QDialog):
             self._show_current()
 
 
+class FootprintOverview(QWidget):
+    """Small, provider-specific bar with separate target coverage disclosure."""
+
+    def __init__(self, provider: str, parent=None):
+        super().__init__(parent)
+        self.provider = provider
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(6, 4, 6, 4)
+        self.heading = QLabel(f"{provider}: Not scanned")
+        layout.addWidget(self.heading)
+        self.bar = QFrame()
+        self.bar.setFixedHeight(14)
+        self.bar_layout = QHBoxLayout(self.bar)
+        self.bar_layout.setContentsMargins(0, 0, 0, 0)
+        self.bar_layout.setSpacing(2)
+        self.application_segment = QFrame()
+        self.shared_segment = QFrame()
+        self.application_segment.setStyleSheet("background-color: #278b89; border-radius: 2px;")
+        self.shared_segment.setStyleSheet("background-color: #7c76bc; border-radius: 2px;")
+        self.bar_layout.addWidget(self.application_segment)
+        self.bar_layout.addWidget(self.shared_segment)
+        self.bar.hide()
+        layout.addWidget(self.bar)
+        self.legend = QLabel("")
+        self.legend.setWordWrap(True)
+        layout.addWidget(self.legend)
+        self.coverage = QLabel("")
+        self.coverage.setWordWrap(True)
+        layout.addWidget(self.coverage)
+
+    def update_overview(self, overview) -> None:
+        if not overview.scanned:
+            self.heading.setText(f"{self.provider}: Not scanned")
+            self.bar.hide()
+            self.legend.setText("Run a scan to see measured storage.")
+            self.coverage.setText("")
+            return
+        self.heading.setText(
+            f"{self.provider}: {format_size(overview.measured_bytes)} "
+            "in reported measurements (not reclaimable space)"
+        )
+        self.legend.setText(
+            f"Applications: {format_size(overview.application_bytes)} · "
+            f"Shared components: {format_size(overview.shared_bytes)}"
+        )
+        a, b = overview.application_bytes, overview.shared_bytes
+        self.bar.setVisible(a + b > 0)
+        # Relative bar widths describe only reported measured bytes.
+        self.bar_layout.setStretch(0, max(1, a) if a else 0)
+        self.bar_layout.setStretch(1, max(1, b) if b else 0)
+        self.application_segment.setVisible(a > 0)
+        self.shared_segment.setVisible(b > 0)
+        self.coverage.setText(
+            f"Known targets: {overview.measured_targets} measured, "
+            f"{overview.absent_targets} absent, "
+            f"{overview.unknown_targets} unknown. "
+            + ("Partial measurement — unknown sizes are not represented in the bar. "
+               if overview.partial else
+               "All identified targets accounted for; other storage may exist. ")
+            + "Target counts are not a percentage of disk space."
+        )
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -817,6 +881,13 @@ class MainWindow(QMainWindow):
         self.provider_status = QLabel("Checking available package providers…")
         self.provider_status.setWordWrap(True)
         layout.addWidget(self.provider_status)
+        self.overview_group = QGroupBox("Storage overview — measured bytes only")
+        overview_layout = QVBoxLayout(self.overview_group)
+        self.flatpak_overview = FootprintOverview("Flatpak")
+        self.snap_overview = FootprintOverview("Snap")
+        overview_layout.addWidget(self.flatpak_overview)
+        overview_layout.addWidget(self.snap_overview)
+        layout.addWidget(self.overview_group)
         self.button = QPushButton("Scan Flatpak installations")
         self.button.clicked.connect(self.start_scan)
         self.button.hide()  # Only reveal after the provider probe succeeds.
@@ -908,6 +979,16 @@ class MainWindow(QMainWindow):
         messages.append("RPM scanner not implemented yet.")
         self.provider_status.setText(" ".join(messages))
         self._update_scan_labels()
+        self.update_overviews()
+
+    def update_overviews(self) -> None:
+        self.flatpak_overview.update_overview(flatpak_overview(
+            self.items, scanned=self._scan_time["Flatpak"] is not None
+        ))
+        self.snap_overview.update_overview(snap_overview(
+            self.snap_records, self.snap_storage,
+            scanned=self._scan_time["Snap"] is not None
+        ))
 
     def _update_scan_labels(self) -> None:
         """Separate provider availability, scan state and coverage."""
@@ -982,6 +1063,7 @@ class MainWindow(QMainWindow):
         self._snap_issues = list(issues)
         self.snap_storage = storage
         self._scan_completed("Snap", len(records), self._snap_issues)
+        self.update_overviews()
         self.render_inventory()
 
     def finish_snap_scan(self) -> None:
@@ -1061,6 +1143,7 @@ class MainWindow(QMainWindow):
         self.items = items
         self._flatpak_issues = list(issues)
         self._scan_completed("Flatpak", len(items), self._flatpak_issues)
+        self.update_overviews()
         self.render_inventory()
 
     def apply_filters(self, *_args) -> None:
