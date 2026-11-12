@@ -289,15 +289,19 @@ def test_provider_cards_adapt_and_hide_unavailable(monkeypatch):
         "flatpak": ProviderStatus("flatpak", True, "ok", "1.18"),
         "snap": ProviderStatus("snap", True, "ok", "2.78"),
     }
+    window.show()
     window.providers_detected(statuses)
+    QApplication.processEvents()
     assert window.overview_grid.indexOf(window.flatpak_card) >= 0
     assert window.overview_grid.indexOf(window.snap_card) >= 0
     assert window.button.parentWidget() is window.flatpak_card
     assert window.snap_button.parentWidget() is window.snap_card
     window.resize(1100, 700)
+    QApplication.processEvents()
     assert window.overview_grid.itemAtPosition(0, 0).widget() is window.flatpak_card
     assert window.overview_grid.itemAtPosition(0, 1).widget() is window.snap_card
     window.resize(700, 700)
+    QApplication.processEvents()
     assert window.overview_grid.itemAtPosition(1, 0).widget() is window.snap_card
     statuses["snap"] = ProviderStatus("snap", False, "missing", None)
     window.providers_detected(statuses)
