@@ -1065,7 +1065,8 @@ class MainWindow(QMainWindow):
             self.overview_grid.addWidget(card, index // columns, index % columns)
             card.show()
         self.overview_group.setVisible(bool(cards))
-        self._position_info_buttons()
+        if hasattr(self, "flatpak_info_button"):
+            self._position_info_buttons()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
