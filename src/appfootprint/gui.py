@@ -970,35 +970,55 @@ class MainWindow(QMainWindow):
 
     def show_results(self, items: list[Item], issues: list[str]) -> None:
         self.items = items
+        self._flatpak_issues = list(issues)
+        self.render_inventory()
+
+    def apply_filters(self, *_args) -> None:
+        source = self.source_filter.currentText()
+        category = self.kind_filter.currentText()
+        for row in range(self.table.rowCount()):
+            provider = self.table.item(row, 9).data(Qt.ItemDataRole.UserRole + 2)
+            kind = self.table.item(row, 0).text()
+            visible = ((source == "All" or source == provider) and
+                       (category == "All" or
+                        (category == "Applications" and kind == "app") or
+                        (category == "Shared components" and kind != "app")))
+            self.table.setRowHidden(row, not visible)
+
+    def render_inventory(self) -> None:
+        rows = combine(self.items, self.snap_records)
         self.table.setSortingEnabled(False)
-        self.table.setRowCount(len(items))
-        for row, item in enumerate(items):
-            values = [
-                item.kind, item.app_id, item.ref, item.installation,
-                item.allocated_bytes,
-                item.user_data_bytes if item.kind == "app" else None,
-                total_bytes(item) if item.kind == "app" else None,
-                item.runtime if item.kind == "app" else "—",
-                item.location + (" | " if item.location and item.errors else "")
-                + "; ".join(item.errors),
-            ]
+        self.table.setRowCount(len(rows))
+        for row, record in enumerate(rows):
+            values = [record.kind, record.identifier, record.reference, record.scope,
+                      record.installed, record.user_data, record.app_total,
+                      record.runtime, record.path, record.provider]
             for col, value in enumerate(values):
-                cell = SizeCell(value) if col in (4, 5, 6) else QTableWidgetItem(str(value))
-                cell.setData(Qt.ItemDataRole.UserRole + 1, row)
+                if col in (4, 5, 6):
+                    cell = (SizeCell(value) if value is not None else
+                            QTableWidgetItem("Not applicable" if
+                                             record.kind != "app" and col in (5, 6)
+                                             else "Unknown"))
+                else:
+                    cell = QTableWidgetItem(str(value))
+                cell.setData(Qt.ItemDataRole.UserRole + 1, record.index)
+                cell.setData(Qt.ItemDataRole.UserRole + 2, record.provider)
                 self.table.setItem(row, col, cell)
+            source = self.table.item(row, 9)
+            source.setText("● " + record.provider)
+            source.setForeground(QBrush(QColor("#278b89" if record.provider == "Flatpak"
+                                               else "#bf7837")))
+            source.setToolTip(record.provider + " package manager")
         self.table.setSortingEnabled(True)
         self.table.sortItems(6, Qt.SortOrder.DescendingOrder)
-        summary = (
-            f"{len(items)} Flatpak records. App total = installed + user data; "
-            "shared runtimes excluded. No files modified."
-        )
-        if items:
-            summary += " " + self._explore_hint()
-        else:
-            summary += " No entries found."
+        self.apply_filters()
+        message = (f"{len(self.items)} Flatpak records; {len(self.snap_records)} "
+                   "Snap revisions. Shared components excluded from application "
+                   "totals; unknown measurements are not zero. Read-only.")
+        issues = self._flatpak_issues + self._snap_issues
         if issues:
-            summary += " Issues: " + "; ".join(issues)
-        self.info.setText(summary)
+            message += " Issues: " + "; ".join(issues)
+        self.info.setText(message)
 
     def show_detail(self, row: int, _column: int) -> None:
         cell = self.table.item(row, 0)
@@ -1006,6 +1026,17 @@ class MainWindow(QMainWindow):
             return
         original_index = cell.data(Qt.ItemDataRole.UserRole + 1)
         if not isinstance(original_index, int):
+            return
+        provider = cell.data(Qt.ItemDataRole.UserRole + 2)
+        if provider == "Snap":
+            record = self.snap_records[original_index]
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(
+                self, "Snap inventory",
+                f"{record.reference} ({record.metadata.get('state', 'unknown')})\\n"
+                "Snap dependency navigation is not implemented yet.\\n"
+                "No files modified."
+            )
             return
         item = self.items[original_index]
         if item.kind not in ("runtime", "app"):
