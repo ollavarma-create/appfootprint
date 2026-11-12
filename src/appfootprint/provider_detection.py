@@ -63,6 +63,27 @@ def probe_snap(timeout: float = 3.0) -> ProviderStatus:
                           version[0] if version else "Snap")
 
 
+def probe_rpm(timeout: float = 3.0) -> ProviderStatus:
+    executable = shutil.which("rpm")
+    if not executable:
+        return ProviderStatus("rpm", False, "RPM executable not found in PATH.")
+    try:
+        version = subprocess.run(
+            [executable, "--version"], check=True, capture_output=True,
+            text=True, timeout=timeout,
+        ).stdout.strip()
+        # Check the installed database without querying package files.
+        subprocess.run(
+            [executable, "-qa", "--queryformat", "%{NAME}\\n"],
+            check=True, capture_output=True, timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        return ProviderStatus("rpm", False, "RPM did not respond in time.")
+    except (OSError, subprocess.SubprocessError) as exc:
+        return ProviderStatus("rpm", False, f"RPM inventory unavailable: {exc}")
+    return ProviderStatus("rpm", True, "RPM inventory available.", version)
+
+
 def detect_providers() -> dict[str, ProviderStatus]:
     """Only implemented providers are actionable in the current UI."""
-    return {"flatpak": probe_flatpak(), "snap": probe_snap()}
+    return {"flatpak": probe_flatpak(), "snap": probe_snap(), "rpm": probe_rpm()}
