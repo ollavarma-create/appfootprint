@@ -31,6 +31,7 @@ from .unified import combine
 from .overview import flatpak_overview, snap_overview, rpm_overview
 from .providers.snap_storage import scan_storage
 from .inventory import StorageRole, MeasurementStatus
+from .measurement_labels import allocated_tooltip
 
 
 def total_bytes(item: Item) -> int | None:
@@ -51,6 +52,7 @@ class SizeCell(QTableWidgetItem):
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
         )
         self.setData(Qt.ItemDataRole.UserRole, value)
+        self.setToolTip(allocated_tooltip(value))
 
     def __lt__(self, other: QTableWidgetItem) -> bool:
         if isinstance(other, SizeCell):
@@ -289,7 +291,12 @@ class StorageInvestigatorDialog(QDialog):
                 if entry.status == "incomplete" else "—", entry.path]
             for col, value in enumerate(values):
                 item = QTableWidgetItem(value)
-                if entry.reason:
+                if col == 1:
+                    item.setToolTip(allocated_tooltip(entry.allocated_bytes))
+                elif col == 3 and entry.status == "incomplete":
+                    item.setToolTip(allocated_tooltip(
+                        entry.known_allocated_bytes, incomplete=True))
+                elif entry.reason:
                     item.setToolTip(entry.reason)
                 self.table.setItem(row, col, item)
         unknown = sum(e.allocated_bytes is None for e in result.children)
@@ -351,6 +358,9 @@ class UserStorageDialog(QDialog):
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setAlternatingRowColors(True)
+        self.table.setSortingEnabled(True)
+        self.table.horizontalHeader().setSortIndicator(
+            3, Qt.SortOrder.DescendingOrder)
         self.table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setStretchLastSection(True)
@@ -405,6 +415,7 @@ class UserStorageDialog(QDialog):
         self.cancel_button.setEnabled(False)
 
     def show_results(self, entries, issues):
+        self.table.setSortingEnabled(False)
         self.table.setRowCount(len(entries))
         for row, entry in enumerate(entries):
             values = [
@@ -414,10 +425,17 @@ class UserStorageDialog(QDialog):
                 if entry.status == "incomplete" else "—",
             ]
             for column, value in enumerate(values):
-                cell = QTableWidgetItem(value)
-                if entry.reason:
+                cell = SizeCell(entry.allocated_bytes) if column == 3 else QTableWidgetItem(value)
+                if column == 3:
+                    cell.setToolTip(allocated_tooltip(entry.allocated_bytes))
+                elif column == 4 and entry.status == "incomplete":
+                    cell.setToolTip(allocated_tooltip(
+                        entry.known_allocated_bytes, incomplete=True))
+                elif entry.reason:
                     cell.setToolTip(entry.reason)
                 self.table.setItem(row, column, cell)
+        self.table.setSortingEnabled(True)
+        self.table.sortItems(3, Qt.SortOrder.DescendingOrder)
         incomplete = sum(e.status in ("incomplete", "inaccessible", "error")
                          for e in entries)
         self.status.setText(
