@@ -39,7 +39,9 @@ def test_timeout_and_error(monkeypatch):
     assert not detection.probe_flatpak().available
 
 
-def test_no_snap_or_rpm_buttons_before_implementation(monkeypatch):
+def test_only_implemented_providers_detected(monkeypatch):
     monkeypatch.setattr(detection, "probe_flatpak",
                         lambda: detection.ProviderStatus("flatpak", True, "ok"))
-    assert set(detection.detect_providers()) == {"flatpak"}
+    monkeypatch.setattr(detection, "probe_snap",
+                        lambda: detection.ProviderStatus("snap", False, "not installed"))
+    assert set(detection.detect_providers()) == {"flatpak", "snap"}
