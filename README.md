@@ -334,3 +334,25 @@ Validation: `pytest -q` and launch the GUI on Fedora. Scan RPM, verify
 the overview counts and the **RPM** table filter, sort by **Installed**,
 double-click complete and incomplete RPM rows, cancel a rescan, and verify
 that Flatpak/Snap scanning and filtering still work.
+
+### RPM capability explorer (PR #20, experimental)
+
+Double-click an RPM package row to open the read-only RPM capability explorer.
+It queries installed RPM `REQUIRENAME` and `PROVIDENAME` arrays once in a
+background thread, shows candidate installed providers for each requirement
+and potential reverse dependents, and supports double-click navigation plus
+Back/Forward. The selected package's original measurement diagnostics remain
+available through **Show selected package measurement**.
+
+**Important limitations:** these are *capability-name candidate matches*,
+not validated RPM dependencies. Requirement versions and flags, rich
+expressions, architecture-specific satisfiability, and DNF transaction
+resolution are not evaluated. Multiple candidates do not imply all are
+required; no match does not prove a missing runtime dependency. The
+explorer must never be used to recommend removals or estimate reclaimed bytes.
+No root access or package-manager transactions are used.
+
+Test with `pytest -q`; on Fedora open an RPM row (e.g. NetworkManager),
+check capability lists, navigate to a candidate and Back, and verify the
+measurement-details button. A database query may take a moment; closing the
+dialog waits for the worker to finish rather than destroying a running thread.
