@@ -153,6 +153,23 @@ class SnapInventoryDialog(QDialog):
         layout.addWidget(close)
         self.worker = None
 
+    def closeEvent(self, event):
+        # A running QThread is owned by this dialog. Do not destroy it while
+        # scanning: request cancellation and keep the dialog alive until done.
+        if self.worker and self.worker.isRunning():
+            self.cancel_scan()
+            self.status.setText("Cancelling Snap scan before closing…")
+            event.ignore()
+            return
+        super().closeEvent(event)
+
+    def reject(self):
+        if self.worker and self.worker.isRunning():
+            self.cancel_scan()
+            self.status.setText("Cancelling Snap scan before closing…")
+            return
+        super().reject()
+
     def start_scan(self):
         if self.worker and self.worker.isRunning():
             return
