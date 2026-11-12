@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sys
+from datetime import datetime
 from threading import Event
 
 from pathlib import Path
@@ -801,6 +802,9 @@ class MainWindow(QMainWindow):
         self._flatpak_issues = []
         self._snap_issues = []
         self.snap_storage = None
+        self._scan_state = {"Flatpak": "not_scanned", "Snap": "not_scanned"}
+        self._scan_time = {"Flatpak": None, "Snap": None}
+        self._scan_count = {"Flatpak": 0, "Snap": 0}
         container = QWidget()
         layout = QVBoxLayout(container)
         self.info = QLabel("No inventory yet. Choose an available provider to start a read-only scan.")
@@ -816,10 +820,16 @@ class MainWindow(QMainWindow):
         self.button.clicked.connect(self.start_scan)
         self.button.hide()  # Only reveal after the provider probe succeeds.
         layout.addWidget(self.button)
+        self.flatpak_scan_status = QLabel("Flatpak: Not scanned")
+        self.flatpak_scan_status.setWordWrap(True)
+        layout.addWidget(self.flatpak_scan_status)
         self.snap_button = QPushButton("Scan Snap installations")
         self.snap_button.clicked.connect(self.start_snap_scan)
         self.snap_button.hide()
         layout.addWidget(self.snap_button)
+        self.snap_scan_status = QLabel("Snap: Not scanned")
+        self.snap_scan_status.setWordWrap(True)
+        layout.addWidget(self.snap_scan_status)
         filters = QHBoxLayout()
         filters.addWidget(QLabel("Source:"))
         self.source_filter = QComboBox()
@@ -896,6 +906,49 @@ class MainWindow(QMainWindow):
                 messages.append(f"{name} unavailable: {status.reason if status else 'not detected'}.")
         messages.append("RPM scanner not implemented yet.")
         self.provider_status.setText(" ".join(messages))
+        self._update_scan_labels()
+
+    def _update_scan_labels(self) -> None:
+        """Separate provider availability, scan state and coverage."""
+        for provider, button, label, available in (
+            ("Flatpak", self.button, self.flatpak_scan_status, self._flatpak_available),
+            ("Snap", self.snap_button, self.snap_scan_status, self._snap_available),
+        ):
+            state = self._scan_state[provider]
+            if state == "scanning":
+                button.setText(f"Scanning {provider}…")
+                status = "Scanning…"
+            else:
+                button.setText(f"{'Rescan' if self._scan_time[provider] else 'Scan'} {provider} installations")
+                if state == "not_scanned":
+                    status = "Not scanned"
+                elif state == "cancelled":
+                    status = "Cancelled"
+                elif state == "failed":
+                    status = "Scan failed"
+                else:
+                    status = ("Scanned with issues" if state == "issues" else "Scanned")
+                if self._scan_time[provider] is not None:
+                    status += (f" · {self._scan_count[provider]} records"
+                               f" · at {self._scan_time[provider].strftime('%H:%M:%S')}")
+                    if state == "cancelled":
+                        status += " (previous results retained)"
+            if provider == "Snap" and self._scan_time["Snap"] is not None:
+                if self.snap_storage is None or any(
+                    m.status not in (MeasurementStatus.MEASURED, MeasurementStatus.ABSENT)
+                    for m in (self.snap_storage.cache, self.snap_storage.snapshots)
+                ):
+                    status += " · Partial coverage"
+            if not available:
+                status += " · Provider unavailable"
+            label.setText(f"{provider}: {status}")
+            label.setVisible(available or self._scan_time[provider] is not None)
+
+    def _scan_completed(self, provider: str, count: int, issues: list[str]) -> None:
+        self._scan_count[provider] = count
+        self._scan_time[provider] = datetime.now().astimezone()
+        self._scan_state[provider] = "issues" if issues else "scanned"
+        self._update_scan_labels()
 
     def open_snap_inventory(self) -> None:
         self.start_snap_scan()
@@ -911,6 +964,8 @@ class MainWindow(QMainWindow):
         self.cancel_button.show()
         self.progress.show()
         self.info.setText("Scanning Snap revisions… (read-only)")
+        self._scan_state["Snap"] = "scanning"
+        self._update_scan_labels()
         self.snap_worker = SnapScanThread(self)
         self.snap_worker.progress_changed.connect(self.info.setText)
         self.snap_worker.finished_scan.connect(self.show_snap_results)
@@ -922,6 +977,7 @@ class MainWindow(QMainWindow):
         self.snap_records = records
         self._snap_issues = list(issues)
         self.snap_storage = storage
+        self._scan_completed("Snap", len(records), self._snap_issues)
         self.render_inventory()
 
     def finish_snap_scan(self) -> None:
@@ -929,7 +985,7 @@ class MainWindow(QMainWindow):
         self.progress.hide()
         self.snap_button.setEnabled(True)
         self.button.setEnabled(True)
-
+        self._update_scan_labels()
 
     def start_scan(self) -> None:
         if not self._flatpak_available:
@@ -940,7 +996,8 @@ class MainWindow(QMainWindow):
             return
         self.snap_button.setEnabled(False)
         self.button.setEnabled(False)
-        self.button.setText("Scanning…")
+        self._scan_state["Flatpak"] = "scanning"
+        self._update_scan_labels()
         self.cancel_button.setEnabled(True)
         self.cancel_button.show()
         self.progress.show()
@@ -962,6 +1019,10 @@ class MainWindow(QMainWindow):
             self.info.setText("Cancelling scan… waiting for current operation.")
 
     def scan_was_cancelled(self) -> None:
+        provider = ("Snap" if self.snap_worker and self.snap_worker.isRunning()
+                    and self._scan_state["Snap"] == "scanning" else "Flatpak")
+        self._scan_state[provider] = "cancelled"
+        self._update_scan_labels()
         # Keep the last completed results rather than showing partial data.
         self.info.setText(
             "Scan cancelled. Previous results retained; no files modified. "
@@ -975,9 +1036,9 @@ class MainWindow(QMainWindow):
     def finish_scan(self) -> None:
         self.cancel_button.hide()
         self.progress.hide()
-        self.button.setText("Scan Flatpak installations")
         self.button.setEnabled(True)
         self.snap_button.setEnabled(True)
+        self._update_scan_labels()
 
     @staticmethod
     def _explore_hint() -> str:
@@ -987,6 +1048,7 @@ class MainWindow(QMainWindow):
     def show_results(self, items: list[Item], issues: list[str]) -> None:
         self.items = items
         self._flatpak_issues = list(issues)
+        self._scan_completed("Flatpak", len(items), self._flatpak_issues)
         self.render_inventory()
 
     def apply_filters(self, *_args) -> None:
