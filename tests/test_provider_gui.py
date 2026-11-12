@@ -131,3 +131,125 @@ def test_snap_dialog_protected_storage_and_shared_data():
     assert "Partial inventory" in dialog.coverage.text()
     assert "No complete storage total" in dialog.coverage.text()
     dialog.close()
+
+
+def test_unified_inventory_source_and_kind_filters(monkeypatch):
+    from appfootprint.scanner import Item
+    from appfootprint.inventory import (
+        InventoryRecord, PackageKind, StorageMeasurement, MeasurementStatus, StorageRole,
+    )
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(gui.ProviderProbeThread, "start", lambda self: None)
+    window = gui.MainWindow()
+    window.show_results([
+        Item(app_id="org.example.App", ref="app/example", installation="user",
+             kind="app", allocated_bytes=4096, user_data_bytes=0)
+    ], [])
+    snap = InventoryRecord(
+        "snap", "core24", "core24/2307", "system", PackageKind.RUNTIME,
+        measurements=(StorageMeasurement(StorageRole.SHARED, MeasurementStatus.MEASURED,
+                                         8192, path="/var/lib/snapd/snaps/core24_2307.snap"),),
+        metadata={"state": "active"},
+    )
+    window.show_snap_results([snap], [], None)
+    assert window.table.rowCount() == 2
+    assert {window.table.item(i, 9).data(gui.Qt.ItemDataRole.UserRole + 2)
+            for i in range(2)} == {"Flatpak", "Snap"}
+    window.source_filter.setCurrentText("Snap")
+    assert sum(not window.table.isRowHidden(i) for i in range(2)) == 1
+    window.kind_filter.setCurrentText("Applications")
+    assert all(window.table.isRowHidden(i) for i in range(2))
+    window.source_filter.setCurrentText("All")
+    assert sum(not window.table.isRowHidden(i) for i in range(2)) == 1
+    window.close()
+
+
+def test_unified_size_columns_sort_with_unknown_and_not_applicable(monkeypatch):
+    from appfootprint.scanner import Item
+    from appfootprint.inventory import (
+        InventoryRecord, PackageKind, StorageMeasurement, MeasurementStatus, StorageRole,
+    )
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(gui.ProviderProbeThread, "start", lambda self: None)
+    window = gui.MainWindow()
+    window.show_results([
+        Item(app_id="org.example.App", ref="app/example", installation="user",
+             kind="app", allocated_bytes=4096, user_data_bytes=0),
+    ], [])
+    shared = InventoryRecord(
+        "snap", "core24", "core24/2307", "system", PackageKind.RUNTIME,
+        measurements=(StorageMeasurement(StorageRole.SHARED, MeasurementStatus.MEASURED,
+                                         8192, path="/var/lib/snapd/snaps/core24_2307.snap"),),
+    )
+    window.show_snap_results([shared], [], None)
+    for column in (4, 5, 6):
+        for order in (gui.Qt.SortOrder.AscendingOrder, gui.Qt.SortOrder.DescendingOrder):
+            window.table.sortItems(column, order)
+        assert all(isinstance(window.table.item(row, column), gui.SizeCell)
+                   for row in range(window.table.rowCount()))
+    assert any(window.table.item(row, 5).text() == "Not applicable"
+               for row in range(window.table.rowCount()))
+    window.close()
+
+
+def test_provider_scan_status_and_rescan_labels(monkeypatch):
+    from appfootprint.provider_detection import ProviderStatus
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(gui.ProviderProbeThread, "start", lambda self: None)
+    window = gui.MainWindow()
+    window.providers_detected({
+        "flatpak": ProviderStatus("flatpak", True, "ok", "1.18"),
+        "snap": ProviderStatus("snap", True, "ok", "2.78"),
+    })
+    assert "Not scanned" in window.flatpak_scan_status.text()
+    assert "Not scanned" in window.snap_scan_status.text()
+    window.show_results([], [])
+    assert "Scanned" in window.flatpak_scan_status.text()
+    assert "0 records" in window.flatpak_scan_status.text()
+    assert "Rescan Flatpak" in window.button.text()
+    assert "Not scanned" in window.snap_scan_status.text()
+    window.show_snap_results([], [], None)
+    assert "Partial coverage" in window.snap_scan_status.text()
+    assert "Rescan Snap" in window.snap_button.text()
+    window._scan_state["Snap"] = "scanning"
+    window.scan_was_cancelled()
+    assert "Cancelled" in window.snap_scan_status.text()
+    assert "previous results retained" in window.snap_scan_status.text()
+    window.close()
+
+
+def test_provider_scan_with_issues_and_failed_state(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(gui.ProviderProbeThread, "start", lambda self: None)
+    window = gui.MainWindow()
+    window.show_results([], ["some entries inaccessible"])
+    assert "Scanned with issues" in window.flatpak_scan_status.text()
+    window.show_results([], ["Scan failed: unavailable"])
+    assert "Scan failed" in window.flatpak_scan_status.text()
+    window.close()
+
+
+def test_scan_progress_is_local_to_provider_status(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(gui.ProviderProbeThread, "start", lambda self: None)
+    window = gui.MainWindow()
+    window._scan_state["Flatpak"] = "scanning"
+    window._scan_state["Snap"] = "not_scanned"
+    class Worker:
+        class Cancel:
+            def is_set(self):
+                return False
+        _cancel = Cancel()
+    window.worker = Worker()
+    window.show_progress("Scanning org.example.App (3/18)…")
+    assert "org.example.App (3/18)" in window.flatpak_scan_status.text()
+    assert "Not scanned" in window.snap_scan_status.text()
+    assert "org.example.App" not in window.info.text()
+    window.snap_worker = Worker()
+    window._scan_state["Snap"] = "scanning"
+    window.show_snap_progress("Scanning snap revision (2/6)…")
+    assert "revision (2/6)" in window.snap_scan_status.text()
+    assert "revision (2/6)" not in window.info.text()
+    window.worker = None
+    window.snap_worker = None
+    window.close()

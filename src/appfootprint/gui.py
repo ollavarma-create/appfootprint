@@ -2,16 +2,17 @@
 from __future__ import annotations
 
 import sys
+from datetime import datetime
 from threading import Event
 
 from pathlib import Path
 from collections.abc import Callable
 
 from PySide6.QtCore import QObject, QRunnable, QThread, QThreadPool, Signal, Qt, QUrl
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QDesktopServices, QColor, QPixmap, QIcon
 from PySide6.QtWidgets import (
     QApplication, QDialog, QDialogButtonBox, QHeaderView, QLabel, QMenu,
-    QMainWindow, QProgressBar, QPushButton, QScrollArea, QStackedWidget, QHBoxLayout, QTableWidget, QTableWidgetItem,
+    QMainWindow, QProgressBar, QPushButton, QScrollArea, QStackedWidget, QHBoxLayout, QComboBox, QTableWidget, QTableWidgetItem,
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
@@ -21,6 +22,7 @@ from .scanner import Item, ScanCancelled, allocated_size, direct_runtime_users, 
 from .advisor import assess_path, space_significance
 from .provider_detection import ProviderStatus, detect_providers
 from .providers.snap import SnapProvider
+from .unified import combine
 from .providers.snap_storage import scan_storage
 from .inventory import StorageRole, MeasurementStatus
 
@@ -796,11 +798,22 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("AppFootprint — Storage inventory (alpha)")
         self.resize(1200, 650)
         self.items: list[Item] = []
+        self.snap_records = []
+        self._flatpak_issues = []
+        self._snap_issues = []
+        self.snap_storage = None
+        self._scan_state = {"Flatpak": "not_scanned", "Snap": "not_scanned"}
+        self._scan_time = {"Flatpak": None, "Snap": None}
+        self._scan_count = {"Flatpak": 0, "Snap": 0}
+        self._scan_progress = {"Flatpak": "", "Snap": ""}
         container = QWidget()
         layout = QVBoxLayout(container)
         self.info = QLabel("No inventory yet. Choose an available provider to start a read-only scan.")
         self.info.setWordWrap(True)
         layout.addWidget(self.info)
+        self.storage_summary = QLabel("Snap cache and snapshots: not measured.")
+        self.storage_summary.setWordWrap(True)
+        layout.addWidget(self.storage_summary)
         self.provider_status = QLabel("Checking available package providers…")
         self.provider_status.setWordWrap(True)
         layout.addWidget(self.provider_status)
@@ -808,10 +821,29 @@ class MainWindow(QMainWindow):
         self.button.clicked.connect(self.start_scan)
         self.button.hide()  # Only reveal after the provider probe succeeds.
         layout.addWidget(self.button)
+        self.flatpak_scan_status = QLabel("Flatpak: Not scanned")
+        self.flatpak_scan_status.setWordWrap(True)
+        layout.addWidget(self.flatpak_scan_status)
         self.snap_button = QPushButton("Scan Snap installations")
-        self.snap_button.clicked.connect(self.open_snap_inventory)
+        self.snap_button.clicked.connect(self.start_snap_scan)
         self.snap_button.hide()
         layout.addWidget(self.snap_button)
+        self.snap_scan_status = QLabel("Snap: Not scanned")
+        self.snap_scan_status.setWordWrap(True)
+        layout.addWidget(self.snap_scan_status)
+        filters = QHBoxLayout()
+        filters.addWidget(QLabel("Source:"))
+        self.source_filter = QComboBox()
+        self.source_filter.addItems(["All", "Flatpak", "Snap"])
+        self.source_filter.currentIndexChanged.connect(self.apply_filters)
+        filters.addWidget(self.source_filter)
+        filters.addWidget(QLabel("Show:"))
+        self.kind_filter = QComboBox()
+        self.kind_filter.addItems(["All", "Applications", "Shared components"])
+        self.kind_filter.currentIndexChanged.connect(self.apply_filters)
+        filters.addWidget(self.kind_filter)
+        filters.addStretch()
+        layout.addLayout(filters)
         self.cancel_button = QPushButton("Cancel scan")
         self.cancel_button.clicked.connect(self.cancel_scan)
         self.cancel_button.hide()
@@ -822,10 +854,10 @@ class MainWindow(QMainWindow):
         self.progress.setAccessibleName("Flatpak scan in progress")
         self.progress.hide()
         layout.addWidget(self.progress)
-        self.table = QTableWidget(0, 9)
+        self.table = QTableWidget(0, 10)
         self.table.setHorizontalHeaderLabels([
             "Kind", "Application ID", "Ref / version", "Installation",
-            "Installed", "User data", "App total", "Runtime", "Path / errors",
+            "Installed", "User data", "App total", "Runtime", "Path / errors", "Source",
         ])
         # Use the active KDE/Qt palette rather than fixed yellow/green colors.
         self.table.setAlternatingRowColors(True)
@@ -841,11 +873,24 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.table)
         self.setCentralWidget(container)
         self.worker: ScanThread | None = None
+        self.snap_worker: SnapScanThread | None = None
         self._flatpak_available = False
         self._snap_available = False
         self.probe = ProviderProbeThread(self)
         self.probe.detected.connect(self.providers_detected)
         self.probe.start()
+
+    def closeEvent(self, event):
+        # Keep worker-owned Qt objects alive until scans stop.
+        running = [worker for worker in (self.worker, self.snap_worker)
+                   if worker is not None and worker.isRunning()]
+        if running:
+            for worker in running:
+                worker.cancel()
+            self.info.setText("Cancelling active scans before closing…")
+            event.ignore()
+            return
+        super().closeEvent(event)
 
     def providers_detected(self, statuses: dict[str, ProviderStatus]) -> None:
         flatpak = statuses.get("flatpak")
@@ -862,22 +907,106 @@ class MainWindow(QMainWindow):
                 messages.append(f"{name} unavailable: {status.reason if status else 'not detected'}.")
         messages.append("RPM scanner not implemented yet.")
         self.provider_status.setText(" ".join(messages))
+        self._update_scan_labels()
+
+    def _update_scan_labels(self) -> None:
+        """Separate provider availability, scan state and coverage."""
+        for provider, button, label, available in (
+            ("Flatpak", self.button, self.flatpak_scan_status, self._flatpak_available),
+            ("Snap", self.snap_button, self.snap_scan_status, self._snap_available),
+        ):
+            state = self._scan_state[provider]
+            if state == "scanning":
+                button.setText(f"Scanning {provider}…")
+                status = self._scan_progress[provider] or "Scanning…"
+            else:
+                button.setText(f"{'Rescan' if self._scan_time[provider] else 'Scan'} {provider} installations")
+                if state == "not_scanned":
+                    status = "Not scanned"
+                elif state == "cancelled":
+                    status = "Cancelled"
+                elif state == "failed":
+                    status = "Scan failed"
+                else:
+                    status = ("Scanned with issues" if state == "issues" else "Scanned")
+                if self._scan_time[provider] is not None:
+                    status += (f" · {self._scan_count[provider]} records"
+                               f" · at {self._scan_time[provider].strftime('%H:%M:%S')}")
+                    if state == "cancelled":
+                        status += " (previous results retained)"
+            if provider == "Snap" and self._scan_time["Snap"] is not None:
+                if self.snap_storage is None or any(
+                    m.status not in (MeasurementStatus.MEASURED, MeasurementStatus.ABSENT)
+                    for m in (self.snap_storage.cache, self.snap_storage.snapshots)
+                ):
+                    status += " · Partial coverage"
+            if not available:
+                status += " · Provider unavailable"
+            label.setText(f"{provider}: {status}")
+            label.setVisible(available or self._scan_time[provider] is not None)
+
+    def _scan_completed(self, provider: str, count: int, issues: list[str]) -> None:
+        self._scan_count[provider] = count
+        self._scan_time[provider] = datetime.now().astimezone()
+        self._scan_progress[provider] = ""
+        self._scan_state[provider] = ("failed" if any(
+            issue.startswith(("Scan failed:", "Snap scan failed:")) for issue in issues
+        ) else "issues" if issues else "scanned")
+        self._update_scan_labels()
 
     def open_snap_inventory(self) -> None:
-        if self._snap_available:
-            SnapInventoryDialog(self).exec()
+        self.start_snap_scan()
+
+    def start_snap_scan(self) -> None:
+        if not self._snap_available or (self.snap_worker and self.snap_worker.isRunning()):
+            return
+        if self.worker and self.worker.isRunning():
+            return
+        self.snap_button.setEnabled(False)
+        self.button.setEnabled(False)
+        self.cancel_button.setEnabled(True)
+        self.cancel_button.show()
+        self.progress.show()
+        self._scan_progress["Snap"] = "Scanning revisions… (read-only)"
+        self._scan_state["Snap"] = "scanning"
+        self._update_scan_labels()
+        self.snap_worker = SnapScanThread(self)
+        self.snap_worker.progress_changed.connect(self.show_snap_progress)
+        self.snap_worker.finished_scan.connect(self.show_snap_results)
+        self.snap_worker.scan_cancelled.connect(self.scan_was_cancelled)
+        self.snap_worker.finished.connect(self.finish_snap_scan)
+        self.snap_worker.start()
+
+    def show_snap_results(self, records, issues, storage) -> None:
+        self.snap_records = records
+        self._snap_issues = list(issues)
+        self.snap_storage = storage
+        self._scan_completed("Snap", len(records), self._snap_issues)
+        self.render_inventory()
+
+    def finish_snap_scan(self) -> None:
+        self.cancel_button.hide()
+        self.progress.hide()
+        self.snap_button.setEnabled(True)
+        self.button.setEnabled(True)
+        self._update_scan_labels()
 
     def start_scan(self) -> None:
         if not self._flatpak_available:
             return
         if self.worker and self.worker.isRunning():
             return
+        if self.snap_worker and self.snap_worker.isRunning():
+            return
+        self.snap_button.setEnabled(False)
         self.button.setEnabled(False)
-        self.button.setText("Scanning…")
+        self._scan_progress["Flatpak"] = "Scanning applications and user data… (read-only)"
+        self._scan_state["Flatpak"] = "scanning"
+        self._update_scan_labels()
         self.cancel_button.setEnabled(True)
         self.cancel_button.show()
         self.progress.show()
-        self.info.setText("Scanning Flatpak applications and user data… (read-only)")
+        # Detailed progress belongs to the Flatpak status line.
         self.worker = ScanThread(self)
         self.worker.progress_changed.connect(self.show_progress)
         self.worker.finished_scan.connect(self.show_results)
@@ -886,12 +1015,20 @@ class MainWindow(QMainWindow):
         self.worker.start()
 
     def cancel_scan(self) -> None:
+        if self.snap_worker and self.snap_worker.isRunning():
+            self.snap_worker.cancel()
+            self.cancel_button.setEnabled(False)
         if self.worker and self.worker.isRunning():
             self.worker.cancel()
             self.cancel_button.setEnabled(False)
             self.info.setText("Cancelling scan… waiting for current operation.")
 
     def scan_was_cancelled(self) -> None:
+        provider = ("Snap" if self._scan_state["Snap"] == "scanning"
+                    else "Flatpak")
+        self._scan_state[provider] = "cancelled"
+        self._scan_progress[provider] = ""
+        self._update_scan_labels()
         # Keep the last completed results rather than showing partial data.
         self.info.setText(
             "Scan cancelled. Previous results retained; no files modified. "
@@ -900,13 +1037,20 @@ class MainWindow(QMainWindow):
 
     def show_progress(self, message: str) -> None:
         if self.worker and not self.worker._cancel.is_set():
-            self.info.setText(message + " (read-only)")
+            self._scan_progress["Flatpak"] = message + " (read-only)"
+            self._update_scan_labels()
+
+    def show_snap_progress(self, message: str) -> None:
+        if self.snap_worker and not self.snap_worker._cancel.is_set():
+            self._scan_progress["Snap"] = message + " (read-only)"
+            self._update_scan_labels()
 
     def finish_scan(self) -> None:
         self.cancel_button.hide()
         self.progress.hide()
-        self.button.setText("Scan Flatpak installations")
         self.button.setEnabled(True)
+        self.snap_button.setEnabled(True)
+        self._update_scan_labels()
 
     @staticmethod
     def _explore_hint() -> str:
@@ -915,35 +1059,85 @@ class MainWindow(QMainWindow):
 
     def show_results(self, items: list[Item], issues: list[str]) -> None:
         self.items = items
+        self._flatpak_issues = list(issues)
+        self._scan_completed("Flatpak", len(items), self._flatpak_issues)
+        self.render_inventory()
+
+    def apply_filters(self, *_args) -> None:
+        source = self.source_filter.currentText()
+        category = self.kind_filter.currentText()
+        for row in range(self.table.rowCount()):
+            provider = self.table.item(row, 9).data(Qt.ItemDataRole.UserRole + 2)
+            kind = self.table.item(row, 0).text()
+            visible = ((source == "All" or source == provider) and
+                       (category == "All" or
+                        (category == "Applications" and kind == "app") or
+                        (category == "Shared components" and kind != "app")))
+            self.table.setRowHidden(row, not visible)
+
+    def render_inventory(self) -> None:
+        rows = combine(self.items, self.snap_records)
         self.table.setSortingEnabled(False)
-        self.table.setRowCount(len(items))
-        for row, item in enumerate(items):
-            values = [
-                item.kind, item.app_id, item.ref, item.installation,
-                item.allocated_bytes,
-                item.user_data_bytes if item.kind == "app" else None,
-                total_bytes(item) if item.kind == "app" else None,
-                item.runtime if item.kind == "app" else "—",
-                item.location + (" | " if item.location and item.errors else "")
-                + "; ".join(item.errors),
-            ]
+        self.table.setRowCount(len(rows))
+        for row, record in enumerate(rows):
+            values = [record.kind, record.identifier, record.reference, record.scope,
+                      record.installed, record.user_data, record.app_total,
+                      record.runtime, record.path, record.provider]
             for col, value in enumerate(values):
-                cell = SizeCell(value) if col in (4, 5, 6) else QTableWidgetItem(str(value))
-                cell.setData(Qt.ItemDataRole.UserRole + 1, row)
+                if col in (4, 5, 6):
+                    # Keep a single item subclass per numeric column. Mixing
+                    # QTableWidgetItem and SizeCell causes Qt's comparison
+                    # dispatch to recurse when sorting missing values.
+                    cell = SizeCell(value)
+                    if value is None:
+                        cell.setText("Not applicable" if
+                                     record.kind != "app" and col in (5, 6)
+                                     else "Unknown")
+                else:
+                    cell = QTableWidgetItem(str(value))
+                cell.setData(Qt.ItemDataRole.UserRole + 1, record.index)
+                cell.setData(Qt.ItemDataRole.UserRole + 2, record.provider)
                 self.table.setItem(row, col, cell)
+            source = self.table.item(row, 9)
+            # Only the marker is colored. Text and row selection remain
+            # controlled by the active Qt/KDE palette (including dark mode).
+            source.setText(record.provider)
+            marker = QPixmap(9, 16)
+            marker.fill(Qt.GlobalColor.transparent)
+            from PySide6.QtGui import QPainter
+            painter = QPainter(marker)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor("#278b89" if record.provider == "Flatpak"
+                                    else "#bf7837"))
+            painter.drawRoundedRect(1, 1, 7, 14, 2, 2)
+            painter.end()
+            source.setIcon(QIcon(marker))
+            source.setToolTip(record.provider + " package manager")
         self.table.setSortingEnabled(True)
         self.table.sortItems(6, Qt.SortOrder.DescendingOrder)
-        summary = (
-            f"{len(items)} Flatpak records. App total = installed + user data; "
-            "shared runtimes excluded. No files modified."
-        )
-        if items:
-            summary += " " + self._explore_hint()
-        else:
-            summary += " No entries found."
+        self.apply_filters()
+        message = (f"{len(self.items)} Flatpak records; {len(self.snap_records)} "
+                   "Snap revisions. Shared components excluded from application "
+                   "totals; unknown measurements are not zero. Read-only.")
+        issues = self._flatpak_issues + self._snap_issues
         if issues:
-            summary += " Issues: " + "; ".join(issues)
-        self.info.setText(summary)
+            message += " Issues: " + "; ".join(issues)
+        if self.items:
+            message += " " + self._explore_hint()
+        self.info.setText(message)
+        if self.snap_storage is not None:
+            def storage_label(m):
+                if m.status == MeasurementStatus.MEASURED:
+                    return format_size(m.allocated_bytes)
+                if m.status == MeasurementStatus.INACCESSIBLE:
+                    return "Requires administrator access"
+                return "Unknown" if m.status != MeasurementStatus.ABSENT else "Absent"
+            self.storage_summary.setText(
+                "Snap package-manager storage (not included in app totals): "
+                f"Cache {storage_label(self.snap_storage.cache)} | "
+                f"Snapshots {storage_label(self.snap_storage.snapshots)}. "
+                "A complete storage total is unavailable when paths are protected."
+            )
 
     def show_detail(self, row: int, _column: int) -> None:
         cell = self.table.item(row, 0)
@@ -951,6 +1145,17 @@ class MainWindow(QMainWindow):
             return
         original_index = cell.data(Qt.ItemDataRole.UserRole + 1)
         if not isinstance(original_index, int):
+            return
+        provider = cell.data(Qt.ItemDataRole.UserRole + 2)
+        if provider == "Snap":
+            record = self.snap_records[original_index]
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(
+                self, "Snap inventory",
+                f"{record.reference} ({record.metadata.get('state', 'unknown')})\\n"
+                "Snap dependency navigation is not implemented yet.\\n"
+                "No files modified."
+            )
             return
         item = self.items[original_index]
         if item.kind not in ("runtime", "app"):

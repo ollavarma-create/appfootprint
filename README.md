@@ -126,3 +126,34 @@ families are marked as **inferred** shared content based on their names;
 this is not yet verified from Snap content-interface metadata. Comparing
 rounded `df -h` output before/after uninstall does not establish exactly
 how many bytes were reclaimed.
+
+### Unified Flatpak and Snap inventory (PR #16)
+
+The main table combines Flatpak applications/runtimes and Snap revisions.
+Use **Source** (All / Flatpak / Snap) and **Show** (All / Applications /
+Shared components) to filter the same inventory. Small teal Flatpak and
+amber Snap markers identify providers without overriding the active Qt/KDE
+theme's row, text, or selection colors. Color is never the only identifier.
+
+Each provider can be scanned independently. A new scan replaces only that
+provider's results; the other provider's last completed inventory remains
+visible. The table's **App total** excludes shared components. Unknown
+measurements remain unknown, not zero. Snap cache and snapshots appear in
+a separate read-only summary, which may report protected paths.
+
+Flatpak rows retain their existing double-click dependency and storage
+explorer. Snap rows currently show a basic read-only details message;
+Snap-specific dependency navigation is not yet implemented. The legacy
+Snap detail dialog remains in code while the unified interface is tested.
+
+### Scan state and freshness
+
+Each available provider shows its own scan state independently of CLI
+availability: **Not scanned**, **Scanning**, **Scanned**, **Scanned with
+issues**, **Scan failed**, or **Cancelled**. A completed scan shows the
+number of records (including zero) and the local completion time. The action
+changes from **Scan** to **Rescan** after a completed scan. Cancellation
+preserves the last completed results. Snap may additionally display
+**Partial coverage** when protected cache or snapshot directories cannot
+be measured; a completed scan never implies full filesystem coverage.
+No elevated privileges are requested.
