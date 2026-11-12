@@ -870,6 +870,8 @@ class MainWindow(QMainWindow):
         self._flatpak_issues = []
         self._snap_issues = []
         self.snap_storage = None
+        self._flatpak_available = False
+        self._snap_available = False
         self._scan_state = {"Flatpak": "not_scanned", "Snap": "not_scanned"}
         self._scan_time = {"Flatpak": None, "Snap": None}
         self._scan_count = {"Flatpak": 0, "Snap": 0}
