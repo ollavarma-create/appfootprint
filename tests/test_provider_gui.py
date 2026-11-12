@@ -99,3 +99,33 @@ def test_snap_dialog_empty_and_revision_rows():
     assert dialog.table.item(0, 2).text() == "active"
     assert "compressed backing files" in dialog.status.text()
     dialog.close()
+
+
+def test_snap_dialog_protected_storage_and_shared_data():
+    from appfootprint.inventory import (
+        InventoryRecord, PackageKind, StorageMeasurement, MeasurementStatus, StorageRole,
+    )
+    from appfootprint.providers.snap_storage import SnapStorage
+    app = QApplication.instance() or QApplication([])
+    dialog = gui.SnapInventoryDialog()
+    record = InventoryRecord(
+        "snap", "core24", "core24/2307", "system", PackageKind.RUNTIME,
+        measurements=(
+            StorageMeasurement(StorageRole.SHARED, MeasurementStatus.MEASURED,
+                               4096, path="/var/lib/snapd/snaps/core24_2307.snap"),
+        ),
+        metadata={"state": "active", "version": "20261022"},
+    )
+    storage = SnapStorage(
+        StorageMeasurement(StorageRole.SHARED, MeasurementStatus.INACCESSIBLE,
+                           path="/var/lib/snapd/cache", reason="Permission denied"),
+        StorageMeasurement(StorageRole.SHARED, MeasurementStatus.INACCESSIBLE,
+                           path="/var/lib/snapd/snapshots", reason="Permission denied"),
+    )
+    dialog.show_results([record], [], storage)
+    assert dialog.table.item(0, 5).text() == "Not applicable"
+    summary = dialog.storage_summary.text()
+    assert summary.count("Requires administrator access") == 2
+    assert "does not request administrator privileges" in summary
+    assert "Permission denied" not in summary
+    dialog.close()
