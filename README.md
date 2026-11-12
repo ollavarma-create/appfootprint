@@ -109,3 +109,17 @@ The roadmap includes broader Linux packaging support, browser/site storage analy
 ## License
 
 GNU General Public License v3.0; see [LICENSE](LICENSE).
+
+
+### Snap package-manager storage
+
+The Snap inventory now reports `/var/lib/snapd/cache` and
+`/var/lib/snapd/snapshots` separately from installed compressed images.
+Measurements are allocated file blocks, not automatically reclaimable space.
+Snapshot archives can preserve data from removed applications; neither these
+archives nor cache entries are automatically deleted. Unknown/inaccessible
+paths are not silently counted as zero. GNOME, Mesa and GTK theme Snap
+families are marked as **inferred** shared content based on their names;
+this is not yet verified from Snap content-interface metadata. Comparing
+rounded `df -h` output before/after uninstall does not establish exactly
+how many bytes were reclaimed.
