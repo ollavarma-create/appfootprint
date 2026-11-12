@@ -26,7 +26,7 @@ from .providers.rpm import RpmProvider
 from .rpm_dependencies import scan_rpm_capabilities
 from .display import provider_title, inventory_column_labels
 from .user_storage import scan_user_storage
-from .storage_investigator import investigate, inspection_commands
+from .storage_investigator import investigate, inspection_commands, inspection_script
 from .unified import combine
 from .overview import flatpak_overview, snap_overview, rpm_overview
 from .providers.snap_storage import scan_storage
@@ -305,14 +305,14 @@ class StorageInvestigatorDialog(QDialog):
 
     def show_commands(self):
         commands = self.selected_commands()
-        self.commands.setText("\n".join(commands) if commands else
+        self.commands.setText(inspection_script(self.table.item(self.table.currentRow(), 4).text()) if commands else
                               "Select a row to see inspection commands")
         self.copy_button.setEnabled(bool(commands))
 
     def copy_commands(self):
         commands = self.selected_commands()
         if commands:
-            QApplication.clipboard().setText("\n".join(commands))
+            QApplication.clipboard().setText(inspection_script(self.table.item(self.table.currentRow(), 4).text()))
 
     def reject(self):
         if self.worker is not None and self.worker.isRunning():
