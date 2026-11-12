@@ -98,6 +98,9 @@ def investigate(
     progress: Callable[[str], None] | None = None,
 ) -> Investigation:
     root = Path(root)
+    # Preserve the established missing-root error contract. Symlinks and
+    # non-directory targets remain rejected by the scope validation below.
+    root.lstat()
     if not allowed_directory(root, home):
         raise ValueError("Select a real directory inside a configured XDG root")
     info = root.lstat()
