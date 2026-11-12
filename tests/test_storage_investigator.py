@@ -101,3 +101,27 @@ def test_history_back_forward_and_branching(tmp_path):
     history.visit(root / "other")
     assert not history.can_forward
     assert history.paths == [root, root / "a", root / "other"]
+
+
+def test_investigator_clears_stale_commands_on_navigation(tmp_path, monkeypatch):
+    """Navigation must not display commands from the previously selected path."""
+    from PySide6.QtWidgets import QApplication, QTableWidgetItem
+    from appfootprint.gui import StorageInvestigatorDialog
+
+    app = QApplication.instance() or QApplication([])
+    root = tmp_path / ".cache"
+    child = root / "child"
+    child.mkdir(parents=True)
+    # Keep this GUI regression deterministic: no background scan needed.
+    monkeypatch.setattr(StorageInvestigatorDialog, "start_scan", lambda self: None)
+    dialog = StorageInvestigatorDialog(root)
+    dialog.table.setRowCount(1)
+    dialog.table.setItem(0, 4, QTableWidgetItem(str(child)))
+    dialog.table.setCurrentCell(0, 4)
+    assert str(child) in dialog.commands.text()
+    dialog.navigate_to(child)
+    assert dialog.commands.text() == "Select a row to see inspection commands"
+    assert not dialog.copy_button.isEnabled()
+    assert not dialog.copy_path_button.isEnabled()
+    assert dialog.table.rowCount() == 0
+    dialog.close()
