@@ -7,7 +7,7 @@ import pytest
 
 from appfootprint.scanner import ScanCancelled
 from appfootprint.storage_investigator import (
-    allowed_root, investigate, inspection_commands,
+    allowed_root, investigate, inspection_commands, inspection_script,
 )
 
 
@@ -59,3 +59,10 @@ def test_quoted_commands_never_delete():
     assert commands[0] == "du -h --max-depth=1 -- " + shlex.quote(path)
     assert commands[1] == "find " + shlex.quote(path) + " -type f -size +500M -print"
     assert "rm -rf" not in commands[0].split(" -- ", 1)[0]
+
+
+def test_inspection_script_has_real_newline_between_commands():
+    script = inspection_script("/home/example/.cache/mozilla")
+    assert script.count("\n") == 1
+    assert "\\n" not in script
+    assert script.splitlines() == list(inspection_commands("/home/example/.cache/mozilla"))
