@@ -225,7 +225,10 @@ class SnapInventoryDialog(QDialog):
                     MeasurementStatus.MEASURED, MeasurementStatus.ABSENT) else ""),
             ]
             for col, value in enumerate(values):
-                cell = SizeCell(value) if col in (4, 5) else QTableWidgetItem(str(value))
+                if col == 5 and not user:
+                    cell = QTableWidgetItem("Not applicable" if record.kind.value == "runtime" else "Not measured")
+                else:
+                    cell = SizeCell(value) if col in (4, 5) else QTableWidgetItem(str(value))
                 self.table.setItem(row, col, cell)
         self.table.setSortingEnabled(True)
         self.table.sortItems(4, Qt.SortOrder.DescendingOrder)
@@ -244,12 +247,16 @@ class SnapInventoryDialog(QDialog):
                     return format_size(measurement.allocated_bytes)
                 if measurement.status == MeasurementStatus.ABSENT:
                     return "Absent"
-                return f"Unknown ({measurement.status.value}: {measurement.reason})"
+                if measurement.status == MeasurementStatus.INACCESSIBLE:
+                    return "Requires administrator access"
+                return f"Unknown ({measurement.status.value})"
             self.storage_summary.setText(
                 f"Package-manager storage (separate from installed images): "
                 f"Cache {describe(storage.cache)} | "
                 f"Snapshots {describe(storage.snapshots)}. "
-                "These are not per-app sizes or necessarily reclaimable."
+                "These are not per-app sizes or necessarily reclaimable. "
+                "Some Snap storage locations are protected by the operating system; "
+                "AppFootprint does not request administrator privileges or modify files."
             )
         else:
             self.storage_summary.setText("Package-manager storage: not measured.")
