@@ -9,6 +9,7 @@ Unlike a general disk analyzer, it aims to show **which application a path belon
 ## Current features (alpha)
 
 - Read-only Flatpak app/runtime inventory, with numeric size sorting.
+- Experimental Snap inventory (PR #15): compressed images, active/disabled revisions, shared bases, and current-user Snap data.
 - Per-user Flatpak data inspection and expandable Storage Explorer.
 - Conservative, explanatory Cleanup Advisor; **no deletion**.
 - Dependency Explorer for primary runtimes and metadata-compatible extensions.
@@ -24,7 +25,7 @@ Initial testing targets Fedora KDE. Other Linux desktops are welcome, but are no
 - PySide6/Qt 6 (installed automatically by pip).
 - An internet connection for the initial Python package installation.
 
-Flatpak applications are useful for testing, but not required just to run the unit tests.
+Flatpak and Snap are optional at runtime. The UI detects which implemented providers are available. Neither package manager is required to run the unit tests.
 
 ## Install and run from source
 
@@ -53,6 +54,24 @@ git pull --ff-only
 source .venv/bin/activate
 python -m pip install -e '.[dev]'
 ```
+
+## Snap inventory (experimental)
+
+If Snap is installed and snapd responds, AppFootprint shows a **Scan Snap
+installations** button. It opens a separate read-only inventory with one row
+per revision. The compressed `.snap` backing file is measured, **not** the
+mounted squashfs content. Disabled revisions are shown separately and are
+not automatically classified as safe to remove. Base and snapd components
+are treated as shared. Current-user data is measured only for an active
+application revision (revision directory and `common`); other users' data,
+system-wide Snap data, snapshots, and arbitrary XDG paths are **not** yet
+attributed. Therefore this is not a complete Snap storage total.
+
+For a staged test: first run without Snap, then with snapd but no snaps,
+then with one or two installed applications, then after removing them.
+Close and reopen AppFootprint between installation/removal stages to
+refresh provider availability. Do not uninstall Snap solely to test
+AppFootprint; removal of Snap packages and snapd can affect other software.
 
 ## Manual test checklist
 
