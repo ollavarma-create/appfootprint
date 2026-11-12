@@ -947,7 +947,9 @@ class MainWindow(QMainWindow):
     def _scan_completed(self, provider: str, count: int, issues: list[str]) -> None:
         self._scan_count[provider] = count
         self._scan_time[provider] = datetime.now().astimezone()
-        self._scan_state[provider] = "issues" if issues else "scanned"
+        self._scan_state[provider] = ("failed" if any(
+            issue.startswith(("Scan failed:", "Snap scan failed:")) for issue in issues
+        ) else "issues" if issues else "scanned")
         self._update_scan_labels()
 
     def open_snap_inventory(self) -> None:
@@ -1019,8 +1021,8 @@ class MainWindow(QMainWindow):
             self.info.setText("Cancelling scan… waiting for current operation.")
 
     def scan_was_cancelled(self) -> None:
-        provider = ("Snap" if self.snap_worker and self.snap_worker.isRunning()
-                    and self._scan_state["Snap"] == "scanning" else "Flatpak")
+        provider = ("Snap" if self._scan_state["Snap"] == "scanning"
+                    else "Flatpak")
         self._scan_state[provider] = "cancelled"
         self._update_scan_labels()
         # Keep the last completed results rather than showing partial data.
