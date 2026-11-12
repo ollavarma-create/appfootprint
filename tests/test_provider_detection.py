@@ -75,8 +75,8 @@ def test_snap_version_whitespace_normalized(monkeypatch):
     def fake_run(argv, **kwargs):
         if argv[1] == "version":
             return subprocess.CompletedProcess(
-                argv, 0, stdout="snap     2.77.1-0.fc44\\nsnapd    2.77.1\\n")
-        return subprocess.CompletedProcess(argv, 0, stdout="Name Version\\n")
+                argv, 0, stdout="snap     2.77.1-0.fc44\nsnapd    2.77.1\n")
+        return subprocess.CompletedProcess(argv, 0, stdout="Name Version\n")
 
     monkeypatch.setattr(detection.subprocess, "run", fake_run)
     status = detection.probe_snap()
