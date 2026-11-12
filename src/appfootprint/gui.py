@@ -1607,7 +1607,6 @@ class MainWindow(QMainWindow):
         provider = cell.data(Qt.ItemDataRole.UserRole + 2)
         if provider == "Snap":
             record = self.snap_records[original_index]
-            from PySide6.QtWidgets import QMessageBox
             QMessageBox.information(
                 self, "Snap inventory",
                 f"{record.reference} ({record.metadata.get('state', 'unknown')})\\n"
@@ -1630,7 +1629,7 @@ class MainWindow(QMainWindow):
                 f"Missing files: {record.metadata.get('absent_files', '?')}",
                 f"Inaccessible files: {record.metadata.get('inaccessible_files', '?')}",
                 *record.issues,
-                "Read-only. No RPM dependency analysis or reclaimable-space estimate.",
+                "Read-only. No DNF dependency resolution or reclaimable-space estimate.",
             ]
             dialog = RpmDependencyDialog(record.reference, self)
             detail_button = QPushButton("Show selected package measurement")
