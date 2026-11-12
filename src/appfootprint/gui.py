@@ -1541,10 +1541,17 @@ class MainWindow(QMainWindow):
         self.table.setWordWrap(False)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.table.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.ResizeToContents
-        )
-        self.table.horizontalHeader().setStretchLastSection(True)
+        # ResizeToContents rescans thousands of RPM rows on each model
+        # dataChanged signal, freezing the GUI during Flatpak rescans.
+        # Use predictable interactive widths instead.
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setDefaultSectionSize(140)
+        header.resizeSection(0, 95)
+        header.resizeSection(1, 210)
+        header.resizeSection(2, 300)
+        header.resizeSection(3, 95)
+        header.setStretchLastSection(True)
         self.table.cellDoubleClicked.connect(self.show_detail)
         layout.addWidget(self.table)
         self.setCentralWidget(container)
