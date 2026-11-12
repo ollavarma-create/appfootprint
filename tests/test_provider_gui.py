@@ -55,3 +55,79 @@ def test_guidance_follows_inventory_state(monkeypatch):
     assert "Previous results retained" in window.info.text()
     assert "Double-click" in window.info.text()
     window.close()
+
+
+def test_snap_button_tracks_provider_availability(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(gui.ProviderProbeThread, "start", lambda self: None)
+    window = gui.MainWindow()
+    window.show()
+    assert window.snap_button.isHidden()
+    window.providers_detected({
+        "flatpak": ProviderStatus("flatpak", True, "ok", "Flatpak 1.18"),
+        "snap": ProviderStatus("snap", False, "Snap executable not found"),
+    })
+    assert window.snap_button.isHidden()
+    window.providers_detected({
+        "flatpak": ProviderStatus("flatpak", True, "ok", "Flatpak 1.18"),
+        "snap": ProviderStatus("snap", True, "ok", "snap 2.7"),
+    })
+    assert window.snap_button.isVisible()
+    assert "Snap available" in window.provider_status.text()
+    window.close()
+
+
+def test_snap_dialog_empty_and_revision_rows():
+    from appfootprint.inventory import (
+        InventoryRecord, PackageKind, StorageMeasurement, MeasurementStatus, StorageRole,
+    )
+    app = QApplication.instance() or QApplication([])
+    dialog = gui.SnapInventoryDialog()
+    dialog.show_results([], [])
+    assert "No Snap records" in dialog.status.text()
+    record = InventoryRecord(
+        "snap", "hello", "hello/42", "system", PackageKind.APPLICATION,
+        measurements=(
+            StorageMeasurement(StorageRole.DIRECT, MeasurementStatus.MEASURED, 4096,
+                               path="/var/lib/snapd/snaps/hello_42.snap"),
+            StorageMeasurement(StorageRole.USER, MeasurementStatus.ABSENT),
+        ),
+        metadata={"state": "active", "version": "2.12"},
+    )
+    dialog.show_results([record], [])
+    assert dialog.table.rowCount() == 1
+    assert dialog.table.item(0, 2).text() == "active"
+    assert "compressed backing files" in dialog.status.text()
+    dialog.close()
+
+
+def test_snap_dialog_protected_storage_and_shared_data():
+    from appfootprint.inventory import (
+        InventoryRecord, PackageKind, StorageMeasurement, MeasurementStatus, StorageRole,
+    )
+    from appfootprint.providers.snap_storage import SnapStorage
+    app = QApplication.instance() or QApplication([])
+    dialog = gui.SnapInventoryDialog()
+    record = InventoryRecord(
+        "snap", "core24", "core24/2307", "system", PackageKind.RUNTIME,
+        measurements=(
+            StorageMeasurement(StorageRole.SHARED, MeasurementStatus.MEASURED,
+                               4096, path="/var/lib/snapd/snaps/core24_2307.snap"),
+        ),
+        metadata={"state": "active", "version": "20261022"},
+    )
+    storage = SnapStorage(
+        StorageMeasurement(StorageRole.SHARED, MeasurementStatus.INACCESSIBLE,
+                           path="/var/lib/snapd/cache", reason="Permission denied"),
+        StorageMeasurement(StorageRole.SHARED, MeasurementStatus.INACCESSIBLE,
+                           path="/var/lib/snapd/snapshots", reason="Permission denied"),
+    )
+    dialog.show_results([record], [], storage)
+    assert dialog.table.item(0, 5).text() == "Not applicable"
+    summary = dialog.storage_summary.text()
+    assert summary.count("Requires administrator access") == 2
+    assert "does not request administrator privileges" in summary
+    assert "Permission denied" not in summary
+    assert "Partial inventory" in dialog.coverage.text()
+    assert "No complete storage total" in dialog.coverage.text()
+    dialog.close()

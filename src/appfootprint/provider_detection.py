@@ -39,6 +39,30 @@ def probe_flatpak(timeout: float = 3.0) -> ProviderStatus:
     return ProviderStatus("flatpak", True, "Flatpak inventory available.", version)
 
 
+def probe_snap(timeout: float = 3.0) -> ProviderStatus:
+    executable = shutil.which("snap")
+    if not executable:
+        return ProviderStatus("snap", False, "Snap executable not found in PATH.")
+    try:
+        version = subprocess.run(
+            [executable, "version"], check=True, capture_output=True,
+            text=True, timeout=timeout,
+        ).stdout.strip().splitlines()
+        inventory = subprocess.run(
+            [executable, "list", "--all"], capture_output=True,
+            text=True, timeout=timeout,
+        )
+        message = (inventory.stderr or inventory.stdout).strip()
+        if inventory.returncode and "no snaps are installed" not in message.casefold():
+            return ProviderStatus("snap", False, f"Snap inventory unavailable: {message}")
+    except subprocess.TimeoutExpired:
+        return ProviderStatus("snap", False, "Snap did not respond in time.")
+    except (OSError, subprocess.SubprocessError) as exc:
+        return ProviderStatus("snap", False, f"Snap unavailable: {exc}")
+    return ProviderStatus("snap", True, "Snap inventory available.",
+                          version[0] if version else "Snap")
+
+
 def detect_providers() -> dict[str, ProviderStatus]:
     """Only implemented providers are actionable in the current UI."""
-    return {"flatpak": probe_flatpak()}
+    return {"flatpak": probe_flatpak(), "snap": probe_snap()}
