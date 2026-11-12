@@ -31,6 +31,7 @@ from .unified import combine
 from .overview import flatpak_overview, snap_overview, rpm_overview
 from .providers.snap_storage import scan_storage
 from .inventory import StorageRole, MeasurementStatus
+from .measurement_labels import allocated_tooltip
 
 
 def total_bytes(item: Item) -> int | None:
@@ -51,6 +52,7 @@ class SizeCell(QTableWidgetItem):
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
         )
         self.setData(Qt.ItemDataRole.UserRole, value)
+        self.setToolTip(allocated_tooltip(value))
 
     def __lt__(self, other: QTableWidgetItem) -> bool:
         if isinstance(other, SizeCell):
@@ -289,7 +291,12 @@ class StorageInvestigatorDialog(QDialog):
                 if entry.status == "incomplete" else "—", entry.path]
             for col, value in enumerate(values):
                 item = QTableWidgetItem(value)
-                if entry.reason:
+                if col == 1:
+                    item.setToolTip(allocated_tooltip(entry.allocated_bytes))
+                elif col == 3 and entry.status == "incomplete":
+                    item.setToolTip(allocated_tooltip(
+                        entry.known_allocated_bytes, incomplete=True))
+                elif entry.reason:
                     item.setToolTip(entry.reason)
                 self.table.setItem(row, col, item)
         unknown = sum(e.allocated_bytes is None for e in result.children)
@@ -415,7 +422,12 @@ class UserStorageDialog(QDialog):
             ]
             for column, value in enumerate(values):
                 cell = QTableWidgetItem(value)
-                if entry.reason:
+                if column == 3:
+                    cell.setToolTip(allocated_tooltip(entry.allocated_bytes))
+                elif column == 4 and entry.status == "incomplete":
+                    cell.setToolTip(allocated_tooltip(
+                        entry.known_allocated_bytes, incomplete=True))
+                elif entry.reason:
                     cell.setToolTip(entry.reason)
                 self.table.setItem(row, column, cell)
         incomplete = sum(e.status in ("incomplete", "inaccessible", "error")
