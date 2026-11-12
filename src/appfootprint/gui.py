@@ -20,6 +20,8 @@ from .navigation import NavigationHistory, history_labels
 from .scanner import Item, ScanCancelled, allocated_size, direct_runtime_users, runtime_extension_hint, format_size, scan
 from .advisor import assess_path, space_significance
 from .provider_detection import ProviderStatus, detect_providers
+from .providers.snap import SnapProvider
+from .inventory import StorageRole, MeasurementStatus
 
 
 def total_bytes(item: Item) -> int | None:
@@ -85,6 +87,134 @@ class ProviderProbeThread(QThread):
                 "flatpak", False, f"Provider detection failed: {exc}"
             )}
         self.detected.emit(statuses)
+
+
+class SnapScanThread(QThread):
+    progress_changed = Signal(str)
+    finished_scan = Signal(object, object)
+    scan_cancelled = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._cancel = Event()
+
+    def cancel(self):
+        self._cancel.set()
+
+    def run(self):
+        try:
+            records, issues = SnapProvider().scan(
+                progress=self.progress_changed.emit, cancelled=self._cancel.is_set)
+        except ScanCancelled:
+            self.scan_cancelled.emit()
+            return
+        except Exception as exc:
+            records, issues = [], [f"Snap scan failed: {exc}"]
+        self.finished_scan.emit(records, issues)
+
+
+class SnapInventoryDialog(QDialog):
+    """Read-only revision inventory. Never count mounted squashfs contents."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("AppFootprint — Snap inventory")
+        self.resize(1050, 540)
+        self.records = []
+        layout = QVBoxLayout(self)
+        self.status = QLabel("Ready to scan Snap revisions (read-only).")
+        self.status.setWordWrap(True)
+        layout.addWidget(self.status)
+        self.scan_button = QPushButton("Scan Snap installations")
+        self.scan_button.clicked.connect(self.start_scan)
+        layout.addWidget(self.scan_button)
+        self.cancel_button = QPushButton("Cancel Snap scan")
+        self.cancel_button.clicked.connect(self.cancel_scan)
+        self.cancel_button.hide()
+        layout.addWidget(self.cancel_button)
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 0)
+        self.progress.hide()
+        layout.addWidget(self.progress)
+        self.table = QTableWidget(0, 7)
+        self.table.setHorizontalHeaderLabels([
+            "Kind", "Snap / revision", "State", "Version",
+            "Compressed image", "User data", "Path / status",
+        ])
+        self.table.setAlternatingRowColors(True)
+        self.table.setSortingEnabled(True)
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setStretchLastSection(True)
+        layout.addWidget(self.table)
+        close = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        close.rejected.connect(self.reject)
+        layout.addWidget(close)
+        self.worker = None
+
+    def start_scan(self):
+        if self.worker and self.worker.isRunning():
+            return
+        self.scan_button.setEnabled(False)
+        self.cancel_button.setEnabled(True)
+        self.cancel_button.show()
+        self.progress.show()
+        self.status.setText("Scanning Snap revisions… (read-only)")
+        self.worker = SnapScanThread(self)
+        self.worker.progress_changed.connect(self.status.setText)
+        self.worker.finished_scan.connect(self.show_results)
+        self.worker.scan_cancelled.connect(
+            lambda: self.status.setText("Snap scan cancelled. Previous results retained."))
+        self.worker.finished.connect(self.finish_scan)
+        self.worker.start()
+
+    def cancel_scan(self):
+        if self.worker and self.worker.isRunning():
+            self.worker.cancel()
+            self.cancel_button.setEnabled(False)
+            self.status.setText("Cancelling Snap scan…")
+
+    def finish_scan(self):
+        self.progress.hide()
+        self.cancel_button.hide()
+        self.scan_button.setEnabled(True)
+
+    def show_results(self, records, issues):
+        self.records = records
+        self.table.setSortingEnabled(False)
+        self.table.setRowCount(len(records))
+        for row, record in enumerate(records):
+            image = next((m for m in record.measurements
+                          if m.role in (StorageRole.DIRECT, StorageRole.SHARED)), None)
+            user = [m for m in record.measurements if m.role == StorageRole.USER]
+            user_bytes = (sum(m.allocated_bytes or 0 for m in user)
+                          if user and all(m.status in (
+                              MeasurementStatus.MEASURED, MeasurementStatus.ABSENT
+                          ) for m in user) else None)
+            values = [
+                record.kind.value, record.reference, record.metadata.get("state", "?"),
+                record.metadata.get("version", ""),
+                image.allocated_bytes if image and image.status == MeasurementStatus.MEASURED else None,
+                user_bytes,
+                (image.path if image else "") +
+                (" | " + image.reason if image and image.status not in (
+                    MeasurementStatus.MEASURED, MeasurementStatus.ABSENT) else ""),
+            ]
+            for col, value in enumerate(values):
+                cell = SizeCell(value) if col in (4, 5) else QTableWidgetItem(str(value))
+                self.table.setItem(row, col, cell)
+        self.table.setSortingEnabled(True)
+        self.table.sortItems(4, Qt.SortOrder.DescendingOrder)
+        message = (f"{len(records)} Snap revisions. Images are compressed backing files; "
+                   "disabled revisions are retained, not automatically disposable. "
+                   "User data covers the current user's active revision and common directory. "
+                   "No mounted filesystem is counted; no files modified.")
+        if not records:
+            message = "No Snap records found. No files modified."
+        if issues:
+            message += " Issues: " + "; ".join(issues)
+        self.status.setText(message)
 
 
 class DirectoryTreeItem(QTreeWidgetItem):
@@ -605,6 +735,10 @@ class MainWindow(QMainWindow):
         self.button.clicked.connect(self.start_scan)
         self.button.hide()  # Only reveal after the provider probe succeeds.
         layout.addWidget(self.button)
+        self.snap_button = QPushButton("Scan Snap installations")
+        self.snap_button.clicked.connect(self.open_snap_inventory)
+        self.snap_button.hide()
+        layout.addWidget(self.snap_button)
         self.cancel_button = QPushButton("Cancel scan")
         self.cancel_button.clicked.connect(self.cancel_scan)
         self.cancel_button.hide()
@@ -635,25 +769,30 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(container)
         self.worker: ScanThread | None = None
         self._flatpak_available = False
+        self._snap_available = False
         self.probe = ProviderProbeThread(self)
         self.probe.detected.connect(self.providers_detected)
         self.probe.start()
 
     def providers_detected(self, statuses: dict[str, ProviderStatus]) -> None:
         flatpak = statuses.get("flatpak")
+        snap = statuses.get("snap")
         self._flatpak_available = bool(flatpak and flatpak.available)
+        self._snap_available = bool(snap and snap.available)
         self.button.setVisible(self._flatpak_available)
-        if self._flatpak_available:
-            self.provider_status.setText(
-                f"Flatpak available ({flatpak.version or 'version unknown'}). "
-                "Snap and RPM scanners are not implemented yet."
-            )
-        else:
-            reason = flatpak.reason if flatpak else "Flatpak provider not detected."
-            self.provider_status.setText(
-                "No supported package provider is available. "
-                f"{reason} Snap and RPM scanners are not implemented yet."
-            )
+        self.snap_button.setVisible(self._snap_available)
+        messages = []
+        for name, status in (("Flatpak", flatpak), ("Snap", snap)):
+            if status and status.available:
+                messages.append(f"{name} available ({status.version or 'version unknown'}).")
+            else:
+                messages.append(f"{name} unavailable: {status.reason if status else 'not detected'}.")
+        messages.append("RPM scanner not implemented yet.")
+        self.provider_status.setText(" ".join(messages))
+
+    def open_snap_inventory(self) -> None:
+        if self._snap_available:
+            SnapInventoryDialog(self).exec()
 
     def start_scan(self) -> None:
         if not self._flatpak_available:
