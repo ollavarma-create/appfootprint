@@ -177,3 +177,16 @@ across Btrfs extents, snapshots, or separate package providers.
 
 The existing detailed inventory remains available below the overview, with
 source identity and measurement paths preserved for future drill-down.
+
+### Responsive provider cards (PR #17 refinement)
+
+Available package providers appear as independent cards in the storage
+overview. On wide windows the cards are side by side; on narrow windows
+they stack vertically. Providers that are not available are hidden, and
+RPM will get a card only when its scanner is implemented. Each card owns
+its Scan/Rescan action, progress and timestamp, measured-byte bar, and
+short target-count coverage indicator. The shared legend explains the
+bar colors and the limitations of the target counts. The detailed table
+and its source/type filters remain below the cards. All colors used for
+measurements have textual labels and are independent of package-source
+colors.
