@@ -841,8 +841,9 @@ class FootprintOverview(QWidget):
         a, b = overview.application_bytes, overview.shared_bytes
         self.bar.setVisible(a + b > 0)
         # Relative bar widths describe only reported measured bytes.
-        self.bar_layout.setStretch(0, max(1, a) if a else 0)
-        self.bar_layout.setStretch(1, max(1, b) if b else 0)
+        total = a + b
+        self.bar_layout.setStretch(0, max(1, round(1000 * a / total)) if a else 0)
+        self.bar_layout.setStretch(1, max(1, round(1000 * b / total)) if b else 0)
         self.application_segment.setVisible(a > 0)
         self.shared_segment.setVisible(b > 0)
         self.coverage.setText(
