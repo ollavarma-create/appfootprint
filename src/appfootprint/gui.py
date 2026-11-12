@@ -22,8 +22,9 @@ from .scanner import Item, ScanCancelled, allocated_size, direct_runtime_users, 
 from .advisor import assess_path, space_significance
 from .provider_detection import ProviderStatus, detect_providers
 from .providers.snap import SnapProvider
+from .providers.rpm import RpmProvider
 from .unified import combine
-from .overview import flatpak_overview, snap_overview
+from .overview import flatpak_overview, snap_overview, rpm_overview
 from .providers.snap_storage import scan_storage
 from .inventory import StorageRole, MeasurementStatus
 
@@ -117,6 +118,30 @@ class SnapScanThread(QThread):
         except Exception as exc:
             records, issues, storage = [], [f"Snap scan failed: {exc}"], None
         self.finished_scan.emit(records, issues, storage)
+
+
+class RpmScanThread(QThread):
+    progress_changed = Signal(str)
+    finished_scan = Signal(object, object)
+    scan_cancelled = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._cancel = Event()
+
+    def cancel(self):
+        self._cancel.set()
+
+    def run(self):
+        try:
+            records, issues = RpmProvider().scan(
+                progress=self.progress_changed.emit, cancelled=self._cancel.is_set)
+        except ScanCancelled:
+            self.scan_cancelled.emit()
+            return
+        except Exception as exc:
+            records, issues = [], [f"RPM scan failed: {exc}"]
+        self.finished_scan.emit(records, issues)
 
 
 class SnapInventoryDialog(QDialog):
@@ -867,15 +892,17 @@ class MainWindow(QMainWindow):
         self.resize(1200, 650)
         self.items: list[Item] = []
         self.snap_records = []
+        self.rpm_records = []
         self._flatpak_issues = []
         self._snap_issues = []
+        self._rpm_issues = []
         self.snap_storage = None
         self._flatpak_available = False
         self._snap_available = False
-        self._scan_state = {"Flatpak": "not_scanned", "Snap": "not_scanned"}
-        self._scan_time = {"Flatpak": None, "Snap": None}
-        self._scan_count = {"Flatpak": 0, "Snap": 0}
-        self._scan_progress = {"Flatpak": "", "Snap": ""}
+        self._scan_state = {"Flatpak": "not_scanned", "Snap": "not_scanned", "RPM": "not_scanned"}
+        self._scan_time = {"Flatpak": None, "Snap": None, "RPM": None}
+        self._scan_count = {"Flatpak": 0, "Snap": 0, "RPM": 0}
+        self._scan_progress = {"Flatpak": "", "Snap": "", "RPM": ""}
         container = QWidget()
         layout = QVBoxLayout(container)
         self.info = QLabel("No inventory yet. Choose an available provider to start a read-only scan.")
@@ -910,17 +937,28 @@ class MainWindow(QMainWindow):
         self.snap_card = self._create_provider_card(
             "Snap", self.snap_overview, self.snap_button, self.snap_scan_status
         )
-        self.provider_versions = {"Flatpak": None, "Snap": None}
+        self.rpm_button = QPushButton("Scan RPM installations")
+        self.rpm_button.clicked.connect(self.start_rpm_scan)
+        self.rpm_scan_status = QLabel("RPM: Not scanned")
+        self.rpm_scan_status.setWordWrap(True)
+        self.rpm_overview = FootprintOverview("RPM")
+        self.rpm_card = self._create_provider_card(
+            "RPM", self.rpm_overview, self.rpm_button, self.rpm_scan_status
+        )
+        self.provider_versions = {"Flatpak": None, "Snap": None, "RPM": None}
         self.flatpak_info_button = self._add_info_button(self.flatpak_card, "Flatpak")
         self.snap_info_button = self._add_info_button(self.snap_card, "Snap")
+        self.rpm_info_button = self._add_info_button(self.rpm_card, "RPM")
         self.button.hide()  # Preserve explicit visibility until availability probe completes.
         self.snap_button.hide()
+        self.rpm_button.hide()
+        self.rpm_card.hide()
         self.flatpak_card.hide()
         self.snap_card.hide()
         self._layout_overview_cards()
         layout.addWidget(self.overview_group)
         self.overview_note = QLabel(
-            "Teal: applications · Violet: shared components. "
+            "Teal: applications · Violet: shared or unclassified package bytes. "
             "Bars show measured bytes within each provider only; "
             "unknown sizes are excluded. Target counts are not disk percentages."
         )
@@ -929,12 +967,12 @@ class MainWindow(QMainWindow):
         filters = QHBoxLayout()
         filters.addWidget(QLabel("Source:"))
         self.source_filter = QComboBox()
-        self.source_filter.addItems(["All", "Flatpak", "Snap"])
+        self.source_filter.addItems(["All", "Flatpak", "Snap", "RPM"])
         self.source_filter.currentIndexChanged.connect(self.apply_filters)
         filters.addWidget(self.source_filter)
         filters.addWidget(QLabel("Show:"))
         self.kind_filter = QComboBox()
-        self.kind_filter.addItems(["All", "Applications", "Shared components"])
+        self.kind_filter.addItems(["All", "Applications", "Shared components", "RPM packages"])
         self.kind_filter.currentIndexChanged.connect(self.apply_filters)
         filters.addWidget(self.kind_filter)
         filters.addStretch()
@@ -969,6 +1007,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(container)
         self.worker: ScanThread | None = None
         self.snap_worker: SnapScanThread | None = None
+        self.rpm_worker: RpmScanThread | None = None
         self._flatpak_available = False
         self._snap_available = False
         self.probe = ProviderProbeThread(self)
@@ -1002,6 +1041,7 @@ class MainWindow(QMainWindow):
         for card, button in (
             (self.flatpak_card, self.flatpak_info_button),
             (self.snap_card, self.snap_info_button),
+            (self.rpm_card, self.rpm_info_button),
         ):
             # Keep the information button on the right side of the card title.
             button.adjustSize()
@@ -1020,7 +1060,7 @@ class MainWindow(QMainWindow):
             "Shared components and filesystem deduplication can affect physical usage.",
             "Unknown measurements are not zero; target counts are not disk percentages.",
         ]
-        issues = self._flatpak_issues if provider == "Flatpak" else self._snap_issues
+        issues = {"Flatpak": self._flatpak_issues, "Snap": self._snap_issues, "RPM": self._rpm_issues}[provider]
         if issues:
             details.append("Scan issues: " + "; ".join(issues))
         if provider == "Snap":
@@ -1030,6 +1070,10 @@ class MainWindow(QMainWindow):
                 "Protected locations may require administrator access; "
                 "AppFootprint does not elevate privileges."
             )
+        elif provider == "RPM":
+            details.append("RPM packages are unclassified. Only complete package measurements "
+                           "contribute to the overview. Unknown bytes are not zero; "
+                           "RPM user data is not measured.")
         else:
             details.append(self._explore_hint())
         return "\n\n".join(details)
@@ -1044,11 +1088,12 @@ class MainWindow(QMainWindow):
         cards = [card for card, available in (
             (self.flatpak_card, self._flatpak_available),
             (self.snap_card, self._snap_available),
+            (self.rpm_card, self._rpm_available),
         ) if available]
         # One column when narrow; otherwise put provider cards side by side.
         # A future RPM card can join this list without changing the layout model.
         columns = 1 if self.width() < 820 else min(3, max(1, len(cards)))
-        all_cards = (self.flatpak_card, self.snap_card)
+        all_cards = (self.flatpak_card, self.snap_card, self.rpm_card)
         # Check exact membership, not only whether currently available
         # cards are present: an unavailable provider may still be in the grid.
         current_cards = {
@@ -1058,7 +1103,7 @@ class MainWindow(QMainWindow):
         if columns == self._overview_columns and current_cards == set(cards):
             return
         self._overview_columns = columns
-        for card in (self.flatpak_card, self.snap_card):
+        for card in all_cards:
             self.overview_grid.removeWidget(card)
             card.hide()
         for index, card in enumerate(cards):
@@ -1076,7 +1121,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         # Keep worker-owned Qt objects alive until scans stop.
-        running = [worker for worker in (self.worker, self.snap_worker)
+        running = [worker for worker in (self.worker, self.snap_worker, self.rpm_worker)
                    if worker is not None and worker.isRunning()]
         if running:
             for worker in running:
