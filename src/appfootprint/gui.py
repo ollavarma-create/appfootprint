@@ -24,6 +24,7 @@ from .provider_detection import ProviderStatus, detect_providers
 from .providers.snap import SnapProvider
 from .providers.rpm import RpmProvider
 from .rpm_dependencies import scan_rpm_capabilities
+from .display import provider_title, inventory_column_labels
 from .unified import combine
 from .overview import flatpak_overview, snap_overview, rpm_overview
 from .providers.snap_storage import scan_storage
@@ -1140,10 +1141,7 @@ class MainWindow(QMainWindow):
         self.progress.hide()
         layout.addWidget(self.progress)
         self.table = QTableWidget(0, 10)
-        self.table.setHorizontalHeaderLabels([
-            "Kind", "Application ID", "Ref / version", "Installation",
-            "Installed", "User data", "App total", "Runtime", "Path / errors", "Source",
-        ])
+        self.table.setHorizontalHeaderLabels(inventory_column_labels())
         # Use the active KDE/Qt palette rather than fixed yellow/green colors.
         self.table.setAlternatingRowColors(True)
         self.table.setSortingEnabled(True)
@@ -1183,6 +1181,8 @@ class MainWindow(QMainWindow):
         # QGroupBox owns the border/title; the button sits in the header area.
         button = QToolButton(card)
         button.setText("ⓘ")
+        button.setMinimumSize(24, 24)
+        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         button.setAccessibleName(f"{provider} information")
         button.setToolTip(f"Show {provider} scan details and measurement limitations")
         button.setAutoRaise(True)
@@ -1243,7 +1243,7 @@ class MainWindow(QMainWindow):
             (self.rpm_card, self._rpm_available),
         ) if available]
         # One column when narrow; otherwise put provider cards side by side.
-        # A future RPM card can join this list without changing the layout model.
+        # Keep all available provider cards in a responsive grid.
         columns = 1 if self.width() < 820 else min(3, max(1, len(cards)))
         all_cards = (self.flatpak_card, self.snap_card, self.rpm_card)
         # Check exact membership, not only whether currently available
@@ -1294,13 +1294,13 @@ class MainWindow(QMainWindow):
         self.provider_versions["Snap"] = snap.version if snap and snap.available else None
         self.provider_versions["RPM"] = rpm.version if rpm and rpm.available else None
         self.flatpak_card.setTitle(
-            f"Flatpak ({self.provider_versions['Flatpak'] or 'version unknown'})"
+            provider_title("Flatpak", self.provider_versions["Flatpak"])
         )
         self.snap_card.setTitle(
-            f"Snap ({self.provider_versions['Snap'] or 'version unknown'})"
+            provider_title("Snap", self.provider_versions["Snap"])
         )
         self.rpm_card.setTitle(
-            f"RPM ({self.provider_versions['RPM'] or 'version unknown'})"
+            provider_title("RPM", self.provider_versions["RPM"])
         )
         self._layout_overview_cards()
         self._position_info_buttons()
