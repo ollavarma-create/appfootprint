@@ -1,0 +1,62 @@
+name: AppImage build (experimental)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/appimage.yml"
+      - "scripts/build-appimage.sh"
+      - "packaging/**"
+      - "assets/**"
+      - "src/**"
+      - "pyproject.toml"
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y patchelf libfuse2 desktop-file-utils
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]'
+          python -m pip install 'Nuitka==2.7.12' 'ordered-set' 'zstandard'
+      - name: Unit tests
+        run: |
+          python -m pytest -q
+          python -m compileall -q src/appfootprint
+      - name: Desktop metadata
+        run: desktop-file-validate packaging/appfootprint.desktop
+      - name: Install appimagetool
+        run: |
+          curl --fail --location --retry 3 \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage \
+            -o /tmp/appimagetool.AppImage
+          chmod +x /tmp/appimagetool.AppImage
+          /tmp/appimagetool.AppImage --appimage-extract >/dev/null
+          sudo install -m 0755 squashfs-root/AppRun /usr/local/bin/appimagetool
+      - name: Build AppImage
+        run: bash scripts/build-appimage.sh
+      - name: Check output
+        run: |
+          test -s dist/AppFootprint-x86_64.AppImage
+          (cd dist && sha256sum -c AppFootprint-x86_64.AppImage.sha256)
+      - name: Upload build artifact (not a release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: AppFootprint-x86_64-ubuntu2204
+          path: |
+            dist/AppFootprint-x86_64.AppImage
+            dist/AppFootprint-x86_64.AppImage.sha256
+          if-no-files-found: error
+          retention-days: 14
