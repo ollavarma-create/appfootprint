@@ -1022,6 +1022,8 @@ class MainWindow(QMainWindow):
         issues = self._flatpak_issues + self._snap_issues
         if issues:
             message += " Issues: " + "; ".join(issues)
+        if self.items:
+            message += " " + self._explore_hint()
         self.info.setText(message)
         if self.snap_storage is not None:
             def storage_label(m):
