@@ -131,3 +131,34 @@ def test_snap_dialog_protected_storage_and_shared_data():
     assert "Partial inventory" in dialog.coverage.text()
     assert "No complete storage total" in dialog.coverage.text()
     dialog.close()
+
+
+def test_unified_inventory_source_and_kind_filters(monkeypatch):
+    from appfootprint.scanner import Item
+    from appfootprint.inventory import (
+        InventoryRecord, PackageKind, StorageMeasurement, MeasurementStatus, StorageRole,
+    )
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(gui.ProviderProbeThread, "start", lambda self: None)
+    window = gui.MainWindow()
+    window.show_results([
+        Item(app_id="org.example.App", ref="app/example", installation="user",
+             kind="app", allocated_bytes=4096, user_data_bytes=0)
+    ], [])
+    snap = InventoryRecord(
+        "snap", "core24", "core24/2307", "system", PackageKind.RUNTIME,
+        measurements=(StorageMeasurement(StorageRole.SHARED, MeasurementStatus.MEASURED,
+                                         8192, path="/var/lib/snapd/snaps/core24_2307.snap"),),
+        metadata={"state": "active"},
+    )
+    window.show_snap_results([snap], [], None)
+    assert window.table.rowCount() == 2
+    assert {window.table.item(i, 9).data(gui.Qt.ItemDataRole.UserRole + 2)
+            for i in range(2)} == {"Flatpak", "Snap"}
+    window.source_filter.setCurrentText("Snap")
+    assert sum(not window.table.isRowHidden(i) for i in range(2)) == 1
+    window.kind_filter.setCurrentText("Applications")
+    assert all(window.table.isRowHidden(i) for i in range(2))
+    window.source_filter.setCurrentText("All")
+    assert sum(not window.table.isRowHidden(i) for i in range(2)) == 1
+    window.close()
