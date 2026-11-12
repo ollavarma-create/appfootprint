@@ -1134,27 +1134,33 @@ class MainWindow(QMainWindow):
     def providers_detected(self, statuses: dict[str, ProviderStatus]) -> None:
         flatpak = statuses.get("flatpak")
         snap = statuses.get("snap")
+        rpm = statuses.get("rpm")
         self._flatpak_available = bool(flatpak and flatpak.available)
         self._snap_available = bool(snap and snap.available)
+        self._rpm_available = bool(rpm and rpm.available)
         self.provider_versions["Flatpak"] = flatpak.version if flatpak and flatpak.available else None
         self.provider_versions["Snap"] = snap.version if snap and snap.available else None
+        self.provider_versions["RPM"] = rpm.version if rpm and rpm.available else None
         self.flatpak_card.setTitle(
             f"Flatpak ({self.provider_versions['Flatpak'] or 'version unknown'})"
         )
         self.snap_card.setTitle(
             f"Snap ({self.provider_versions['Snap'] or 'version unknown'})"
         )
+        self.rpm_card.setTitle(
+            f"RPM ({self.provider_versions['RPM'] or 'version unknown'})"
+        )
         self._layout_overview_cards()
         self._position_info_buttons()
         self.button.setVisible(self._flatpak_available)
         self.snap_button.setVisible(self._snap_available)
+        self.rpm_button.setVisible(self._rpm_available)
         messages = []
-        for name, status in (("Flatpak", flatpak), ("Snap", snap)):
+        for name, status in (("Flatpak", flatpak), ("Snap", snap), ("RPM", rpm)):
             if status and status.available:
                 messages.append(f"{name} available ({status.version or 'version unknown'}).")
             else:
                 messages.append(f"{name} unavailable: {status.reason if status else 'not detected'}.")
-        messages.append("RPM scanner not implemented yet.")
         self.provider_status.setText(" ".join(messages))
         self._update_scan_labels()
         self.update_overviews()
@@ -1167,12 +1173,20 @@ class MainWindow(QMainWindow):
             self.snap_records, self.snap_storage,
             scanned=self._scan_time["Snap"] is not None
         ))
+        self.rpm_overview.update_overview(rpm_overview(
+            self.rpm_records, scanned=self._scan_time["RPM"] is not None
+        ))
+        if self._scan_time["RPM"] is not None:
+            self.rpm_overview.legend.setText(
+                "RPM packages (unclassified); complete measurements only"
+            )
 
     def _update_scan_labels(self) -> None:
         """Separate provider availability, scan state and coverage."""
         for provider, button, label, available in (
             ("Flatpak", self.button, self.flatpak_scan_status, self._flatpak_available),
             ("Snap", self.snap_button, self.snap_scan_status, self._snap_available),
+            ("RPM", self.rpm_button, self.rpm_scan_status, self._rpm_available),
         ):
             state = self._scan_state[provider]
             if state == "scanning":
@@ -1193,6 +1207,10 @@ class MainWindow(QMainWindow):
                                f" · at {self._scan_time[provider].strftime('%H:%M:%S')}")
                     if state == "cancelled":
                         status += " (previous results retained)"
+            if provider == "RPM" and self._scan_time["RPM"] is not None:
+                incomplete = sum(bool(record.issues) for record in self.rpm_records)
+                if incomplete:
+                    status += f" · {incomplete} incomplete"
             if provider == "Snap" and self._scan_time["Snap"] is not None:
                 if self.snap_storage is None or any(
                     m.status not in (MeasurementStatus.MEASURED, MeasurementStatus.ABSENT)
@@ -1209,7 +1227,7 @@ class MainWindow(QMainWindow):
         self._scan_time[provider] = datetime.now().astimezone()
         self._scan_progress[provider] = ""
         self._scan_state[provider] = ("failed" if any(
-            issue.startswith(("Scan failed:", "Snap scan failed:")) for issue in issues
+            issue.startswith(("Scan failed:", "Snap scan failed:", "RPM scan failed:")) for issue in issues
         ) else "issues" if issues else "scanned")
         self._update_scan_labels()
 
