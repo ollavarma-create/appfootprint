@@ -595,10 +595,7 @@ class MainWindow(QMainWindow):
         self.items: list[Item] = []
         container = QWidget()
         layout = QVBoxLayout(container)
-        self.info = QLabel(
-            "Read-only inventory. Totals exclude shared runtimes. "
-            "Double-click an application to explore user data, or a runtime for an explanation."
-        )
+        self.info = QLabel("No inventory yet. Choose an available provider to start a read-only scan.")
         self.info.setWordWrap(True)
         layout.addWidget(self.info)
         self.provider_status = QLabel("Checking available package providers…")
@@ -684,7 +681,10 @@ class MainWindow(QMainWindow):
 
     def scan_was_cancelled(self) -> None:
         # Keep the last completed results rather than showing partial data.
-        self.info.setText("Scan cancelled. Previous results retained; no files modified.")
+        self.info.setText(
+            "Scan cancelled. Previous results retained; no files modified. "
+            + (self._explore_hint() if self.items else "")
+        )
 
     def show_progress(self, message: str) -> None:
         if self.worker and not self.worker._cancel.is_set():
@@ -695,6 +695,11 @@ class MainWindow(QMainWindow):
         self.progress.hide()
         self.button.setText("Scan Flatpak installations")
         self.button.setEnabled(True)
+
+    @staticmethod
+    def _explore_hint() -> str:
+        return ("Double-click an application to explore user data, or a runtime "
+                "to examine shared dependencies.")
 
     def show_results(self, items: list[Item], issues: list[str]) -> None:
         self.items = items
@@ -720,6 +725,10 @@ class MainWindow(QMainWindow):
             f"{len(items)} Flatpak records. App total = installed + user data; "
             "shared runtimes excluded. No files modified."
         )
+        if items:
+            summary += " " + self._explore_hint()
+        else:
+            summary += " No entries found."
         if issues:
             summary += " Issues: " + "; ".join(issues)
         self.info.setText(summary)
