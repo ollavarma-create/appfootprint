@@ -274,3 +274,41 @@ for field, count in totals.items():
     print(field, count)
 PY
 ```
+
+### RPM hardlink attribution (PR #18 refinement)
+
+RPM file-path ownership and inode identity are evaluated separately. A
+hardlinked inode referenced by paths owned **only by one RPM package** is
+counted **once** for that package. Subsequent same-package links are
+tracked in `internal_hardlink_paths`, and do not make the package
+measurement incomplete. An inode referenced by paths belonging to
+**different packages** is not assigned to either package: those paths
+remain unknown in `cross_package_hardlink_paths` and the existing
+`shared_inode_paths` counter. Exact multi-owned paths take precedence
+over inode-sharing classification.
+
+The resulting counts describe path occurrences, not distinct inodes or
+recoverable bytes. RPM file absence and permission limitations are
+unchanged. On Btrfs, reflink sharing remains undetectable with inode
+identity alone.
+
+To inspect the refined diagnostic counts, run:
+
+```bash
+python - <<'PY'
+from collections import Counter
+from appfootprint.providers.rpm import RpmProvider
+
+records, issues = RpmProvider().scan()
+fields = ("internal_hardlink_paths", "cross_package_hardlink_paths",
+          "multi_owned_paths", "absent_files", "inaccessible_files")
+counts = Counter()
+for record in records:
+    for field in fields:
+        counts[field] += int(record.metadata[field])
+print("Packages:", len(records), "Incomplete:", sum(bool(r.issues) for r in records))
+print("Issues:", issues)
+for field in fields:
+    print(field, counts[field])
+PY
+```
