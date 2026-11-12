@@ -120,3 +120,34 @@ def test_multi_owned_path_takes_precedence_over_shared_inode(monkeypatch, tmp_pa
             int(item.metadata["multi_owned_paths"]) +
             int(item.metadata["shared_inode_paths"])
         )
+
+
+def test_same_package_hardlinks_count_one_inode(monkeypatch, tmp_path):
+    (tmp_path / "usr").mkdir()
+    (tmp_path / "usr/first").write_bytes(b"x" * 8192)
+    os.link(tmp_path / "usr/first", tmp_path / "usr/second")
+    fake_cli(monkeypatch, record("single", ["/usr/first", "/usr/second"]))
+    records, issues = module.RpmProvider(tmp_path).scan()
+    assert not issues
+    item = records[0]
+    assert item.measurements[0].status == MeasurementStatus.MEASURED
+    assert item.measurements[0].allocated_bytes == (
+        (tmp_path / "usr/first").lstat().st_blocks * 512
+    )
+    assert item.metadata["internal_hardlink_paths"] == "1"
+    assert item.metadata["shared_inode_paths"] == "0"
+    assert item.metadata["ambiguous_files"] == "0"
+    assert item.metadata["measured_files"] == "1"
+
+
+def test_cross_package_hardlinks_still_unknown(monkeypatch, tmp_path):
+    (tmp_path / "usr").mkdir()
+    (tmp_path / "usr/first").write_bytes(b"x" * 8192)
+    os.link(tmp_path / "usr/first", tmp_path / "usr/second")
+    fake_cli(monkeypatch, record("one", ["/usr/first"]) +
+             record("two", ["/usr/second"]))
+    records, issues = module.RpmProvider(tmp_path).scan()
+    assert not issues
+    assert all(r.measurements[0].status == MeasurementStatus.ERROR for r in records)
+    assert all(r.metadata["cross_package_hardlink_paths"] == "1" for r in records)
+    assert all(r.metadata["internal_hardlink_paths"] == "0" for r in records)
