@@ -79,6 +79,12 @@ def test_missing_and_ambiguous_ownership_never_claim_full_measurement(monkeypatc
     assert records[0].metadata["absent_files"] == "1"
     assert records[0].metadata["ambiguous_files"] == "2"
     assert records[1].metadata["ambiguous_files"] == "2"
+    assert records[0].metadata["multi_owned_paths"] == "1"
+    assert records[0].metadata["shared_inode_paths"] == "1"
+    assert records[1].metadata["multi_owned_paths"] == "1"
+    assert records[1].metadata["shared_inode_paths"] == "1"
+    assert "multi-owned paths" in records[0].issues[0]
+    assert "shared-inode paths" in records[0].issues[0]
 
 
 def test_cancel_before_query_and_during_measurement(monkeypatch, tmp_path):
@@ -93,3 +99,24 @@ def test_cancel_before_query_and_during_measurement(monkeypatch, tmp_path):
 def test_empty_rpm_database(monkeypatch, tmp_path):
     fake_cli(monkeypatch, "")
     assert module.RpmProvider(tmp_path).scan() == ([], [])
+
+
+def test_multi_owned_path_takes_precedence_over_shared_inode(monkeypatch, tmp_path):
+    (tmp_path / "usr").mkdir()
+    (tmp_path / "usr/a").write_bytes(b"data")
+    os.link(tmp_path / "usr/a", tmp_path / "usr/b")
+    fake_cli(monkeypatch,
+             record("one", ["/usr/a", "/usr/b"]) +
+             record("two", ["/usr/a"]))
+    records, issues = module.RpmProvider(tmp_path).scan()
+    assert not issues
+    by_name = {record.identifier: record for record in records}
+    assert by_name["one"].metadata["multi_owned_paths"] == "1"
+    assert by_name["one"].metadata["shared_inode_paths"] == "1"
+    assert by_name["two"].metadata["multi_owned_paths"] == "1"
+    assert by_name["two"].metadata["shared_inode_paths"] == "0"
+    for item in records:
+        assert int(item.metadata["ambiguous_files"]) == (
+            int(item.metadata["multi_owned_paths"]) +
+            int(item.metadata["shared_inode_paths"])
+        )
