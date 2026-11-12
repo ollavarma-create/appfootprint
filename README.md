@@ -381,3 +381,26 @@ measurement arithmetic, dependency matching, or deletion behavior.
    details for the currently selected package.
 6. Cancel and rerun a scan; verify the UI recovers and remains responsive.
 7. Check KDE light/dark themes and scaling (100% and 125% where available).
+
+### User Storage (PR #22, experimental)
+
+Open **User Storage…** above the combined inventory table, then click
+**Scan user storage**. This separately measures five conventional directories
+under the current user's home: `~/.cache`, `~/.config`,
+`~/.local/share`, `~/.local/state`, and `~/.var/app`.
+
+The scan is read-only, cancellable, and never follows symlinks or traverses
+other filesystems. Hardlinked inodes are counted only once within each tree.
+For incomplete scans the complete size is **Unknown**; the known subtotal
+is labeled separately. Missing directories are shown as absent.
+
+**Never add these values to Flatpak/Snap/RPM totals.** In particular
+`~/.var/app` overlaps with Flatpak user data, and directory measurements
+can share Btrfs extents/snapshots. Allocated-byte figures are not promises
+of physically unique or reclaimable disk space. The scan neither deletes
+nor classifies data as safe to delete.
+
+Validation: run `pytest -q`, launch the GUI, open User Storage, scan
+and compare selected directory values with `du -B1` (differences can arise
+from inode handling and filesystem accounting). Check cancellation, symlinks,
+permission failures, and that the existing three provider cards do not change.
