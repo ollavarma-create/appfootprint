@@ -1,5 +1,5 @@
 """Provider-scoped overview accounting and coverage safeguards."""
-from appfootprint.overview import flatpak_overview, snap_overview
+from appfootprint.overview import flatpak_overview, snap_overview, rpm_overview
 from appfootprint.scanner import Item
 from appfootprint.inventory import (
     InventoryRecord, PackageKind, StorageMeasurement, StorageRole, MeasurementStatus,
@@ -44,3 +44,23 @@ def test_no_scans_does_not_claim_coverage():
     result = snap_overview([], None, scanned=True)
     assert result.unknown_targets == 2
     assert result.measured_bytes == 0
+
+
+def test_rpm_overview_excludes_partial_known_subtotals():
+    complete = InventoryRecord(
+        "rpm", "one", "one-1.x86_64", "system", PackageKind.OTHER,
+        measurements=(StorageMeasurement(
+            StorageRole.DIRECT, MeasurementStatus.MEASURED, 4096),),
+    )
+    partial = InventoryRecord(
+        "rpm", "two", "two-1.x86_64", "system", PackageKind.OTHER,
+        measurements=(StorageMeasurement(
+            StorageRole.DIRECT, MeasurementStatus.ERROR, reason="missing file"),),
+        issues=("missing file",),
+        metadata={"known_allocated_bytes": "9999999"},
+    )
+    overview = rpm_overview([complete, partial], scanned=True)
+    assert overview.measured_bytes == 4096
+    assert overview.application_bytes == 0
+    assert (overview.measured_targets, overview.unknown_targets) == (1, 1)
+    assert overview.partial
