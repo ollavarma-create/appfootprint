@@ -253,3 +253,28 @@ def test_scan_progress_is_local_to_provider_status(monkeypatch):
     window.worker = None
     window.snap_worker = None
     window.close()
+
+
+def test_overview_updates_per_provider_without_conflating_snap_storage(monkeypatch):
+    from appfootprint.scanner import Item
+    from appfootprint.inventory import StorageMeasurement, StorageRole, MeasurementStatus
+    from appfootprint.providers.snap_storage import SnapStorage
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(gui.ProviderProbeThread, "start", lambda self: None)
+    window = gui.MainWindow()
+    assert "Not scanned" in window.flatpak_overview.heading.text()
+    assert "Not scanned" in window.snap_overview.heading.text()
+    window.show_results([
+        Item("org.example.App", "app/example", "system", "app",
+             allocated_bytes=4096, user_data_bytes=None)
+    ], [])
+    assert "Partial measurement" in window.flatpak_overview.coverage.text()
+    assert "Not scanned" in window.snap_overview.heading.text()
+    storage = SnapStorage(
+        StorageMeasurement(StorageRole.SHARED, MeasurementStatus.INACCESSIBLE),
+        StorageMeasurement(StorageRole.SHARED, MeasurementStatus.INACCESSIBLE),
+    )
+    window.show_snap_results([], [], storage)
+    assert "2 unknown" in window.snap_overview.coverage.text()
+    assert "0.0 B" in window.snap_overview.heading.text()
+    window.close()
