@@ -101,8 +101,8 @@ def _classification(name: str, notes: str) -> tuple[PackageKind, str]:
     if "base" in tokens or name in {"core", "core18", "core20", "core22",
                                     "core24", "core26", "snapd", "bare"}:
         return PackageKind.RUNTIME, "declared_base_or_system"
-    if (re.fullmatch(r"gnome-\\d+-\\d+", name) or
-            re.fullmatch(r"mesa-\\d+", name) or
+    if (re.fullmatch(r"gnome-\d+-\d+", name) or
+            re.fullmatch(r"mesa-\d+", name) or
             name == "gtk-common-themes"):
         return PackageKind.RUNTIME, "inferred_shared_content"
     return PackageKind.APPLICATION, "unverified_application"
