@@ -805,6 +805,7 @@ class MainWindow(QMainWindow):
         self._scan_state = {"Flatpak": "not_scanned", "Snap": "not_scanned"}
         self._scan_time = {"Flatpak": None, "Snap": None}
         self._scan_count = {"Flatpak": 0, "Snap": 0}
+        self._scan_progress = {"Flatpak": "", "Snap": ""}
         container = QWidget()
         layout = QVBoxLayout(container)
         self.info = QLabel("No inventory yet. Choose an available provider to start a read-only scan.")
@@ -917,7 +918,7 @@ class MainWindow(QMainWindow):
             state = self._scan_state[provider]
             if state == "scanning":
                 button.setText(f"Scanning {provider}…")
-                status = "Scanning…"
+                status = self._scan_progress[provider] or "Scanning…"
             else:
                 button.setText(f"{'Rescan' if self._scan_time[provider] else 'Scan'} {provider} installations")
                 if state == "not_scanned":
@@ -947,6 +948,7 @@ class MainWindow(QMainWindow):
     def _scan_completed(self, provider: str, count: int, issues: list[str]) -> None:
         self._scan_count[provider] = count
         self._scan_time[provider] = datetime.now().astimezone()
+        self._scan_progress[provider] = ""
         self._scan_state[provider] = ("failed" if any(
             issue.startswith(("Scan failed:", "Snap scan failed:")) for issue in issues
         ) else "issues" if issues else "scanned")
@@ -965,11 +967,11 @@ class MainWindow(QMainWindow):
         self.cancel_button.setEnabled(True)
         self.cancel_button.show()
         self.progress.show()
-        self.info.setText("Scanning Snap revisions… (read-only)")
+        self._scan_progress["Snap"] = "Scanning revisions… (read-only)"
         self._scan_state["Snap"] = "scanning"
         self._update_scan_labels()
         self.snap_worker = SnapScanThread(self)
-        self.snap_worker.progress_changed.connect(self.info.setText)
+        self.snap_worker.progress_changed.connect(self.show_snap_progress)
         self.snap_worker.finished_scan.connect(self.show_snap_results)
         self.snap_worker.scan_cancelled.connect(self.scan_was_cancelled)
         self.snap_worker.finished.connect(self.finish_snap_scan)
@@ -998,12 +1000,13 @@ class MainWindow(QMainWindow):
             return
         self.snap_button.setEnabled(False)
         self.button.setEnabled(False)
+        self._scan_progress["Flatpak"] = "Scanning applications and user data… (read-only)"
         self._scan_state["Flatpak"] = "scanning"
         self._update_scan_labels()
         self.cancel_button.setEnabled(True)
         self.cancel_button.show()
         self.progress.show()
-        self.info.setText("Scanning Flatpak applications and user data… (read-only)")
+        # Detailed progress belongs to the Flatpak status line.
         self.worker = ScanThread(self)
         self.worker.progress_changed.connect(self.show_progress)
         self.worker.finished_scan.connect(self.show_results)
@@ -1024,6 +1027,7 @@ class MainWindow(QMainWindow):
         provider = ("Snap" if self._scan_state["Snap"] == "scanning"
                     else "Flatpak")
         self._scan_state[provider] = "cancelled"
+        self._scan_progress[provider] = ""
         self._update_scan_labels()
         # Keep the last completed results rather than showing partial data.
         self.info.setText(
@@ -1033,7 +1037,13 @@ class MainWindow(QMainWindow):
 
     def show_progress(self, message: str) -> None:
         if self.worker and not self.worker._cancel.is_set():
-            self.info.setText(message + " (read-only)")
+            self._scan_progress["Flatpak"] = message + " (read-only)"
+            self._update_scan_labels()
+
+    def show_snap_progress(self, message: str) -> None:
+        if self.snap_worker and not self.snap_worker._cancel.is_set():
+            self._scan_progress["Snap"] = message + " (read-only)"
+            self._update_scan_labels()
 
     def finish_scan(self) -> None:
         self.cancel_button.hide()
