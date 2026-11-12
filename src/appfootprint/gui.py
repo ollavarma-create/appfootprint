@@ -8,10 +8,10 @@ from pathlib import Path
 from collections.abc import Callable
 
 from PySide6.QtCore import QObject, QRunnable, QThread, QThreadPool, Signal, Qt, QUrl
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QDesktopServices, QColor, QBrush
 from PySide6.QtWidgets import (
     QApplication, QDialog, QDialogButtonBox, QHeaderView, QLabel, QMenu,
-    QMainWindow, QProgressBar, QPushButton, QScrollArea, QStackedWidget, QHBoxLayout, QTableWidget, QTableWidgetItem,
+    QMainWindow, QProgressBar, QPushButton, QScrollArea, QStackedWidget, QHBoxLayout, QComboBox, QTableWidget, QTableWidgetItem,
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
@@ -21,6 +21,7 @@ from .scanner import Item, ScanCancelled, allocated_size, direct_runtime_users, 
 from .advisor import assess_path, space_significance
 from .provider_detection import ProviderStatus, detect_providers
 from .providers.snap import SnapProvider
+from .unified import combine
 from .providers.snap_storage import scan_storage
 from .inventory import StorageRole, MeasurementStatus
 
@@ -796,6 +797,9 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("AppFootprint — Storage inventory (alpha)")
         self.resize(1200, 650)
         self.items: list[Item] = []
+        self.snap_records = []
+        self._flatpak_issues = []
+        self._snap_issues = []
         container = QWidget()
         layout = QVBoxLayout(container)
         self.info = QLabel("No inventory yet. Choose an available provider to start a read-only scan.")
@@ -809,9 +813,22 @@ class MainWindow(QMainWindow):
         self.button.hide()  # Only reveal after the provider probe succeeds.
         layout.addWidget(self.button)
         self.snap_button = QPushButton("Scan Snap installations")
-        self.snap_button.clicked.connect(self.open_snap_inventory)
+        self.snap_button.clicked.connect(self.start_snap_scan)
         self.snap_button.hide()
         layout.addWidget(self.snap_button)
+        filters = QHBoxLayout()
+        filters.addWidget(QLabel("Source:"))
+        self.source_filter = QComboBox()
+        self.source_filter.addItems(["All", "Flatpak", "Snap"])
+        self.source_filter.currentIndexChanged.connect(self.apply_filters)
+        filters.addWidget(self.source_filter)
+        filters.addWidget(QLabel("Show:"))
+        self.kind_filter = QComboBox()
+        self.kind_filter.addItems(["All", "Applications", "Shared components"])
+        self.kind_filter.currentIndexChanged.connect(self.apply_filters)
+        filters.addWidget(self.kind_filter)
+        filters.addStretch()
+        layout.addLayout(filters)
         self.cancel_button = QPushButton("Cancel scan")
         self.cancel_button.clicked.connect(self.cancel_scan)
         self.cancel_button.hide()
@@ -822,10 +839,10 @@ class MainWindow(QMainWindow):
         self.progress.setAccessibleName("Flatpak scan in progress")
         self.progress.hide()
         layout.addWidget(self.progress)
-        self.table = QTableWidget(0, 9)
+        self.table = QTableWidget(0, 10)
         self.table.setHorizontalHeaderLabels([
             "Kind", "Application ID", "Ref / version", "Installation",
-            "Installed", "User data", "App total", "Runtime", "Path / errors",
+            "Installed", "User data", "App total", "Runtime", "Path / errors", "Source",
         ])
         # Use the active KDE/Qt palette rather than fixed yellow/green colors.
         self.table.setAlternatingRowColors(True)
@@ -841,6 +858,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.table)
         self.setCentralWidget(container)
         self.worker: ScanThread | None = None
+        self.snap_worker: SnapScanThread | None = None
         self._flatpak_available = False
         self._snap_available = False
         self.probe = ProviderProbeThread(self)
@@ -864,14 +882,47 @@ class MainWindow(QMainWindow):
         self.provider_status.setText(" ".join(messages))
 
     def open_snap_inventory(self) -> None:
-        if self._snap_available:
-            SnapInventoryDialog(self).exec()
+        self.start_snap_scan()
+
+    def start_snap_scan(self) -> None:
+        if not self._snap_available or (self.snap_worker and self.snap_worker.isRunning()):
+            return
+        if self.worker and self.worker.isRunning():
+            return
+        self.snap_button.setEnabled(False)
+        self.button.setEnabled(False)
+        self.cancel_button.setEnabled(True)
+        self.cancel_button.show()
+        self.progress.show()
+        self.info.setText("Scanning Snap revisions… (read-only)")
+        self.snap_worker = SnapScanThread(self)
+        self.snap_worker.progress_changed.connect(self.info.setText)
+        self.snap_worker.finished_scan.connect(self.show_snap_results)
+        self.snap_worker.scan_cancelled.connect(self.scan_was_cancelled)
+        self.snap_worker.finished.connect(self.finish_snap_scan)
+        self.snap_worker.start()
+
+    def show_snap_results(self, records, issues, storage) -> None:
+        self.snap_records = records
+        self._snap_issues = list(issues)
+        self.snap_storage = storage
+        self.render_inventory()
+
+    def finish_snap_scan(self) -> None:
+        self.cancel_button.hide()
+        self.progress.hide()
+        self.snap_button.setEnabled(True)
+        self.button.setEnabled(True)
+
 
     def start_scan(self) -> None:
         if not self._flatpak_available:
             return
         if self.worker and self.worker.isRunning():
             return
+        if self.snap_worker and self.snap_worker.isRunning():
+            return
+        self.snap_button.setEnabled(False)
         self.button.setEnabled(False)
         self.button.setText("Scanning…")
         self.cancel_button.setEnabled(True)
@@ -886,6 +937,9 @@ class MainWindow(QMainWindow):
         self.worker.start()
 
     def cancel_scan(self) -> None:
+        if self.snap_worker and self.snap_worker.isRunning():
+            self.snap_worker.cancel()
+            self.cancel_button.setEnabled(False)
         if self.worker and self.worker.isRunning():
             self.worker.cancel()
             self.cancel_button.setEnabled(False)
@@ -907,6 +961,7 @@ class MainWindow(QMainWindow):
         self.progress.hide()
         self.button.setText("Scan Flatpak installations")
         self.button.setEnabled(True)
+        self.snap_button.setEnabled(True)
 
     @staticmethod
     def _explore_hint() -> str:
