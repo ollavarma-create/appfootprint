@@ -800,11 +800,15 @@ class MainWindow(QMainWindow):
         self.snap_records = []
         self._flatpak_issues = []
         self._snap_issues = []
+        self.snap_storage = None
         container = QWidget()
         layout = QVBoxLayout(container)
         self.info = QLabel("No inventory yet. Choose an available provider to start a read-only scan.")
         self.info.setWordWrap(True)
         layout.addWidget(self.info)
+        self.storage_summary = QLabel("Snap cache and snapshots: not measured.")
+        self.storage_summary.setWordWrap(True)
+        layout.addWidget(self.storage_summary)
         self.provider_status = QLabel("Checking available package providers…")
         self.provider_status.setWordWrap(True)
         layout.addWidget(self.provider_status)
@@ -1019,6 +1023,19 @@ class MainWindow(QMainWindow):
         if issues:
             message += " Issues: " + "; ".join(issues)
         self.info.setText(message)
+        if self.snap_storage is not None:
+            def storage_label(m):
+                if m.status == MeasurementStatus.MEASURED:
+                    return format_size(m.allocated_bytes)
+                if m.status == MeasurementStatus.INACCESSIBLE:
+                    return "Requires administrator access"
+                return "Unknown" if m.status != MeasurementStatus.ABSENT else "Absent"
+            self.storage_summary.setText(
+                "Snap package-manager storage (not included in app totals): "
+                f"Cache {storage_label(self.snap_storage.cache)} | "
+                f"Snapshots {storage_label(self.snap_storage.snapshots)}. "
+                "A complete storage total is unavailable when paths are protected."
+            )
 
     def show_detail(self, row: int, _column: int) -> None:
         cell = self.table.item(row, 0)
