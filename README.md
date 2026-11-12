@@ -199,3 +199,42 @@ read-only policy, measurement caveats, and (for Snap) cache/snapshot access
 limitations. The same button has a hover tooltip. This replaces the three
 long explanatory lines above the overview; scan progress and issue state
 remain visible in the cards. The shared bar legend stays visible.
+
+### Experimental RPM inventory foundation (PR #18)
+
+The new `appfootprint.providers.rpm.RpmProvider` is a **read-only,
+non-GUI** foundation for the next provider. It runs a single
+`rpm -qa --queryformat` query and obtains installed package identities and
+RPM-owned file paths from the local database. It then uses `lstat()` and
+`st_blocks * 512` for regular files and symlinks, without traversing
+directories or symlink targets. Directory entries are excluded to avoid
+attributing directory contents to multiple packages.
+
+RPM package classification is **OTHER / unclassified** by default. Package
+identities are provider-specific and must not be merged with Snap or Flatpak
+names. When a file is missing, unreadable, or its path/inode is shared across
+packages, the affected package measurement is marked **incomplete** and its
+size is **unknown**. The known-byte subtotal and measured/missing/inaccessible/
+ambiguous file counts are retained as metadata, but must not be presented
+as the complete package size. These are allocated block indicators, **not
+reclaimable or deduplicated physical bytes**; Btrfs reflinks and snapshots
+cannot be resolved using `st_blocks` alone. User data is not attributed to
+RPM packages.
+
+No RPM UI card, DNF operation, removal, administrator escalation or
+filesystem modification is part of PR #18. The provider is deliberately
+isolated for synthetic tests and empirical Fedora validation before
+integration in PR #19. Run `pytest -q` and optionally inspect results
+without changing the system:
+
+```bash
+python - <<'PY'
+from appfootprint.providers.rpm import RpmProvider
+records, issues = RpmProvider().scan()
+print("RPM packages:", len(records), "issues:", issues)
+print("Incomplete packages:", sum(bool(r.issues) for r in records))
+for r in records[:5]:
+    print(r.identifier, r.reference, r.measurements[0].status.value,
+          r.metadata["known_allocated_bytes"], r.issues)
+PY
+```
