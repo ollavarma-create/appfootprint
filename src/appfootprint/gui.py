@@ -11,7 +11,7 @@ from collections.abc import Callable
 from PySide6.QtCore import QObject, QRunnable, QThread, QThreadPool, Signal, Qt, QUrl
 from PySide6.QtGui import QDesktopServices, QColor, QPixmap, QIcon
 from PySide6.QtWidgets import (
-    QApplication, QDialog, QDialogButtonBox, QHeaderView, QLabel, QMenu, QFrame, QGroupBox, QGridLayout, QSizePolicy,
+    QApplication, QDialog, QDialogButtonBox, QHeaderView, QLabel, QMenu, QFrame, QGroupBox, QGridLayout, QSizePolicy, QToolButton, QMessageBox,
     QMainWindow, QProgressBar, QPushButton, QScrollArea, QStackedWidget, QHBoxLayout, QComboBox, QTableWidget, QTableWidgetItem,
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
@@ -880,13 +880,13 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(container)
         self.info = QLabel("No inventory yet. Choose an available provider to start a read-only scan.")
         self.info.setWordWrap(True)
-        layout.addWidget(self.info)
+        self.info.hide()  # Detail text is available from provider info buttons.
         self.storage_summary = QLabel("Snap cache and snapshots: not measured.")
         self.storage_summary.setWordWrap(True)
-        layout.addWidget(self.storage_summary)
+        self.storage_summary.hide()
         self.provider_status = QLabel("Checking available package providers…")
         self.provider_status.setWordWrap(True)
-        layout.addWidget(self.provider_status)
+        self.provider_status.hide()
         self.overview_group = QGroupBox("Storage overview — reported bytes, not reclaimable space")
         self.overview_grid = QGridLayout(self.overview_group)
         self.overview_grid.setContentsMargins(8, 8, 8, 8)
@@ -910,6 +910,9 @@ class MainWindow(QMainWindow):
         self.snap_card = self._create_provider_card(
             "Snap", self.snap_overview, self.snap_button, self.snap_scan_status
         )
+        self.provider_versions = {"Flatpak": None, "Snap": None}
+        self.flatpak_info_button = self._add_info_button(self.flatpak_card, "Flatpak")
+        self.snap_info_button = self._add_info_button(self.snap_card, "Snap")
         self.button.hide()  # Preserve explicit visibility until availability probe completes.
         self.snap_button.hide()
         self.flatpak_card.hide()
@@ -984,6 +987,59 @@ class MainWindow(QMainWindow):
         body.addWidget(status)
         return card
 
+    def _add_info_button(self, card: QGroupBox, provider: str) -> QToolButton:
+        # A button beside the title is keyboard-accessible, unlike a tooltip alone.
+        # QGroupBox owns the border/title; the button sits in the header area.
+        button = QToolButton(card)
+        button.setText("ⓘ")
+        button.setAccessibleName(f"{provider} information")
+        button.setToolTip(f"Show {provider} scan details and measurement limitations")
+        button.setAutoRaise(True)
+        button.clicked.connect(lambda: self.show_provider_information(provider))
+        return button
+
+    def _position_info_buttons(self) -> None:
+        for card, button in (
+            (self.flatpak_card, self.flatpak_info_button),
+            (self.snap_card, self.snap_info_button),
+        ):
+            # Keep the information button on the right side of the card title.
+            button.adjustSize()
+            button.move(max(0, card.width() - button.width() - 9), 1)
+            button.raise_()
+
+    def _provider_information(self, provider: str) -> str:
+        version = self.provider_versions.get(provider) or "version unknown"
+        count = self._scan_count[provider]
+        status = self._scan_state[provider].replace("_", " ")
+        details = [
+            f"{provider} {version}",
+            f"Scan status: {status}; {count} records in last completed inventory.",
+            "AppFootprint is read-only and never requests administrator privileges.",
+            "Reported bytes are not a prediction of space reclaimed by uninstalling.",
+            "Shared components and filesystem deduplication can affect physical usage.",
+            "Unknown measurements are not zero; target counts are not disk percentages.",
+        ]
+        issues = self._flatpak_issues if provider == "Flatpak" else self._snap_issues
+        if issues:
+            details.append("Scan issues: " + "; ".join(issues))
+        if provider == "Snap":
+            details.append(self.storage_summary.text())
+            details.append(
+                "Snap cache and snapshots are not included in application totals. "
+                "Protected locations may require administrator access; "
+                "AppFootprint does not elevate privileges."
+            )
+        else:
+            details.append(self._explore_hint())
+        return "\\n\\n".join(details)
+
+    def show_provider_information(self, provider: str) -> None:
+        QMessageBox.information(
+            self, f"{provider} — measurement information",
+            self._provider_information(provider)
+        )
+
     def _layout_overview_cards(self) -> None:
         cards = [card for card, available in (
             (self.flatpak_card, self._flatpak_available),
@@ -1009,11 +1065,13 @@ class MainWindow(QMainWindow):
             self.overview_grid.addWidget(card, index // columns, index % columns)
             card.show()
         self.overview_group.setVisible(bool(cards))
+        self._position_info_buttons()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        if hasattr(self, "overview_grid") and hasattr(self, "_flatpak_available"):
+        if hasattr(self, "overview_grid") and hasattr(self, "flatpak_info_button"):
             self._layout_overview_cards()
+            self._position_info_buttons()
 
     def closeEvent(self, event):
         # Keep worker-owned Qt objects alive until scans stop.
@@ -1032,7 +1090,16 @@ class MainWindow(QMainWindow):
         snap = statuses.get("snap")
         self._flatpak_available = bool(flatpak and flatpak.available)
         self._snap_available = bool(snap and snap.available)
+        self.provider_versions["Flatpak"] = flatpak.version if flatpak and flatpak.available else None
+        self.provider_versions["Snap"] = snap.version if snap and snap.available else None
+        self.flatpak_card.setTitle(
+            f"Flatpak ({self.provider_versions['Flatpak'] or 'version unknown'})"
+        )
+        self.snap_card.setTitle(
+            f"Snap ({self.provider_versions['Snap'] or 'version unknown'})"
+        )
         self._layout_overview_cards()
+        self._position_info_buttons()
         self.button.setVisible(self._flatpak_available)
         self.snap_button.setVisible(self._snap_available)
         messages = []
