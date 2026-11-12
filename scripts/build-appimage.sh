@@ -14,18 +14,14 @@ python -m nuitka --standalone --enable-plugin=pyside6 \
 test -x build/entrypoint.dist/AppFootprint
 APPDIR="$ROOT/build/AppFootprint.AppDir"
 rm -rf "$APPDIR"
-mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/applications" "$APPDIR/usr/share/icons/hicolor/scalable/apps" "$APPDIR/usr/share/icons/hicolor/256x256/apps"
+mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/applications" "$APPDIR/usr/share/icons/hicolor/256x256/apps"
 cp -a build/entrypoint.dist/. "$APPDIR/usr/bin/"
 cp packaging/appfootprint.desktop "$APPDIR/appfootprint.desktop"
 cp packaging/appfootprint.desktop "$APPDIR/usr/share/applications/appfootprint.desktop"
-cp assets/appfootprint.svg "$APPDIR/appfootprint.svg"
-cp assets/appfootprint.svg "$APPDIR/usr/share/icons/hicolor/scalable/apps/appfootprint.svg"
-cp assets/appfootprint.svg "$APPDIR/appfootprint.svg"
 cp packaging/AppRun "$APPDIR/AppRun"
 chmod +x "$APPDIR/AppRun"
-# AppImage desktop metadata requires a root PNG icon matching Icon=appfootprint.
-# Convert checked-in scalable SVG to PNG on the build host.
-rsvg-convert --width 256 --height 256 --output "$APPDIR/appfootprint.png" assets/appfootprint.svg
+# Use the approved PNG artwork directly; no SVG approximation or conversion.
+cp assets/appfootprint.png "$APPDIR/appfootprint.png"
 cp "$APPDIR/appfootprint.png" "$APPDIR/usr/share/icons/hicolor/256x256/apps/appfootprint.png"
 ARCH=x86_64 appimagetool "$APPDIR" "$ROOT/dist/AppFootprint-x86_64.AppImage"
 chmod +x dist/AppFootprint-x86_64.AppImage
