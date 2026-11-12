@@ -26,7 +26,8 @@ from .providers.rpm import RpmProvider
 from .rpm_dependencies import scan_rpm_capabilities
 from .display import provider_title, inventory_column_labels
 from .user_storage import scan_user_storage
-from .storage_investigator import investigate, inspection_commands, inspection_script
+from .storage_investigator import (investigate, inspection_commands, inspection_script,
+                                   allowed_directory, NavigationHistory)
 from .unified import combine
 from .overview import flatpak_overview, snap_overview, rpm_overview
 from .providers.snap_storage import scan_storage
@@ -207,7 +208,9 @@ class StorageInvestigatorDialog(QDialog):
 
     def __init__(self, root, parent=None):
         super().__init__(parent)
-        self.root = root
+        self.root = Path(root)
+        self.history = NavigationHistory.at(self.root)
+        self.pending_path = None
         self.setWindowTitle("Storage Investigator — " + str(root))
         self.resize(980, 580)
         layout = QVBoxLayout(self)
@@ -217,6 +220,18 @@ class StorageInvestigatorDialog(QDialog):
             "or reclaimable-space estimate. No commands are executed.")
         self.note.setWordWrap(True)
         layout.addWidget(self.note)
+        nav = QHBoxLayout()
+        self.back_button = QPushButton("Back")
+        self.back_button.clicked.connect(self.go_back)
+        nav.addWidget(self.back_button)
+        self.forward_button = QPushButton("Forward")
+        self.forward_button.clicked.connect(self.go_forward)
+        nav.addWidget(self.forward_button)
+        self.path_label = QLabel()
+        self.path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        nav.addWidget(self.path_label, 1)
+        layout.addLayout(nav)
+        self.update_navigation()
         self.status = QLabel("Not scanned")
         layout.addWidget(self.status)
         self.table = QTableWidget(0, 5)
@@ -229,6 +244,7 @@ class StorageInvestigatorDialog(QDialog):
             QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.itemSelectionChanged.connect(self.show_commands)
+        self.table.cellDoubleClicked.connect(self.open_child)
         layout.addWidget(self.table)
         layout.addWidget(QLabel("Inspection examples (copy only; no execution):"))
         self.commands = QLabel("Select a row to see inspection commands")
@@ -247,6 +263,10 @@ class StorageInvestigatorDialog(QDialog):
         self.copy_button.setEnabled(False)
         self.copy_button.clicked.connect(self.copy_commands)
         controls.addWidget(self.copy_button)
+        self.copy_path_button = QPushButton("Copy path")
+        self.copy_path_button.setEnabled(False)
+        self.copy_path_button.clicked.connect(self.copy_path)
+        controls.addWidget(self.copy_path_button)
         controls.addStretch()
         close = QPushButton("Close")
         close.clicked.connect(self.reject)
@@ -261,7 +281,7 @@ class StorageInvestigatorDialog(QDialog):
         self.scan_button.setEnabled(False)
         self.cancel_button.setEnabled(True)
         self.status.setText("Scanning…")
-        self.worker = InvestigationThread(self.root, self)
+        self.worker = InvestigationThread(self.history.current, self)
         self.worker.progress_changed.connect(self.status.setText)
         self.worker.loaded.connect(self.show_results)
         self.worker.cancelled_scan.connect(
@@ -315,11 +335,55 @@ class StorageInvestigatorDialog(QDialog):
         self.commands.setText(inspection_script(self.table.item(self.table.currentRow(), 4).text()) if commands else
                               "Select a row to see inspection commands")
         self.copy_button.setEnabled(bool(commands))
+        self.copy_path_button.setEnabled(bool(commands))
 
     def copy_commands(self):
         commands = self.selected_commands()
         if commands:
             QApplication.clipboard().setText(inspection_script(self.table.item(self.table.currentRow(), 4).text()))
+
+    def update_navigation(self):
+        self.back_button.setEnabled(self.history.can_back)
+        self.forward_button.setEnabled(self.history.can_forward)
+        self.path_label.setText(str(self.history.current))
+        self.setWindowTitle("Storage Investigator — " + str(self.history.current))
+
+    def navigate_to(self, path):
+        if self.worker is not None and self.worker.isRunning():
+            return
+        if not allowed_directory(path):
+            self.status.setText("Cannot navigate: not a real directory within XDG storage")
+            return
+        self.history.visit(path)
+        self.update_navigation()
+        self.start_scan()
+
+    def open_child(self, row, _column):
+        item = self.table.item(row, 4)
+        if item is not None:
+            self.navigate_to(Path(item.text()))
+
+    def go_back(self):
+        if self.worker is not None and self.worker.isRunning():
+            return
+        if self.history.can_back:
+            self.history.back()
+            self.update_navigation()
+            self.start_scan()
+
+    def go_forward(self):
+        if self.worker is not None and self.worker.isRunning():
+            return
+        if self.history.can_forward:
+            self.history.forward()
+            self.update_navigation()
+            self.start_scan()
+
+    def copy_path(self):
+        row = self.table.currentRow()
+        item = self.table.item(row, 4) if row >= 0 else None
+        if item is not None:
+            QApplication.clipboard().setText(item.text())
 
     def reject(self):
         if self.worker is not None and self.worker.isRunning():
