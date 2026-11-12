@@ -67,3 +67,18 @@ def test_rpm_detection_available(monkeypatch):
     assert status.available
     assert len(calls) == 2
     assert calls[1][1:3] == ["-qa", "--queryformat"]
+
+
+def test_snap_version_whitespace_normalized(monkeypatch):
+    monkeypatch.setattr(detection.shutil, "which", lambda _: "/usr/bin/snap")
+
+    def fake_run(argv, **kwargs):
+        if argv[1] == "version":
+            return subprocess.CompletedProcess(
+                argv, 0, stdout="snap     2.77.1-0.fc44\nsnapd    2.77.1\n")
+        return subprocess.CompletedProcess(argv, 0, stdout="Name Version\n")
+
+    monkeypatch.setattr(detection.subprocess, "run", fake_run)
+    status = detection.probe_snap()
+    assert status.available
+    assert status.version == "snap 2.77.1-0.fc44"

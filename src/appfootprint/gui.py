@@ -23,6 +23,7 @@ from .advisor import assess_path, space_significance
 from .provider_detection import ProviderStatus, detect_providers
 from .providers.snap import SnapProvider
 from .providers.rpm import RpmProvider
+from .rpm_dependencies import scan_rpm_capabilities
 from .unified import combine
 from .overview import flatpak_overview, snap_overview, rpm_overview
 from .providers.snap_storage import scan_storage
@@ -142,6 +143,156 @@ class RpmScanThread(QThread):
         except Exception as exc:
             records, issues = [], [f"RPM scan failed: {exc}"]
         self.finished_scan.emit(records, issues)
+
+
+class RpmDependencyThread(QThread):
+    loaded = Signal(object, object)
+
+    def run(self):
+        try:
+            self.loaded.emit(scan_rpm_capabilities(), None)
+        except Exception as exc:
+            self.loaded.emit(None, str(exc))
+
+
+class RpmDependencyDialog(QDialog):
+    """Navigate candidate RPM capability matches; never imply removability."""
+
+    def __init__(self, reference: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("RPM capability explorer — candidate matches")
+        self.resize(940, 620)
+        self.reference = reference
+        self.measurements_by_reference = {}
+        self.index = None
+        self.history = [reference]
+        self.position = 0
+        layout = QVBoxLayout(self)
+        self.note = QLabel(
+            "Read-only capability-name matches. Versions, rich expressions and "
+            "DNF resolution are NOT verified. Matches are not removal advice."
+        )
+        self.note.setWordWrap(True)
+        layout.addWidget(self.note)
+        self.heading = QLabel("Loading RPM capabilities…")
+        self.heading.setWordWrap(True)
+        layout.addWidget(self.heading)
+        nav = QHBoxLayout()
+        self.back_button = QPushButton("Back")
+        self.back_button.clicked.connect(self.back)
+        self.back_button.setEnabled(False)
+        nav.addWidget(self.back_button)
+        self.forward_button = QPushButton("Forward")
+        self.forward_button.clicked.connect(self.forward)
+        self.forward_button.setEnabled(False)
+        nav.addWidget(self.forward_button)
+        nav.addStretch()
+        layout.addLayout(nav)
+        self.requires_tree = QTreeWidget()
+        self.requires_tree.setHeaderLabels(["Required capability", "Candidate installed provider"])
+        self.requires_tree.itemDoubleClicked.connect(self.navigate_item)
+        layout.addWidget(QLabel("Requires — candidate providers (double-click to navigate)"))
+        layout.addWidget(self.requires_tree)
+        self.reverse_tree = QTreeWidget()
+        self.reverse_tree.setHeaderLabels(["Potential dependent package", "Matching capability"])
+        self.reverse_tree.itemDoubleClicked.connect(self.navigate_item)
+        layout.addWidget(QLabel("Potential reverse dependencies (double-click to navigate)"))
+        layout.addWidget(self.reverse_tree)
+        close = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        close.rejected.connect(self.reject)
+        layout.addWidget(close)
+        self.worker = RpmDependencyThread(self)
+        self.worker.loaded.connect(self.loaded)
+        self.worker.start()
+
+    def closeEvent(self, event):
+        if self.worker.isRunning():
+            self.heading.setText("Waiting for RPM query to finish before closing…")
+            event.ignore()
+            return
+        super().closeEvent(event)
+
+    def reject(self):
+        if self.worker.isRunning():
+            self.heading.setText("Waiting for RPM query to finish before closing…")
+            return
+        super().reject()
+
+    def loaded(self, index, error):
+        if error:
+            self.heading.setText("RPM capability inventory failed: " + error)
+            return
+        self.index = index
+        self.show_package(self.reference)
+
+    def show_measurement(self):
+        record = self.measurements_by_reference.get(self.reference)
+        if record is None:
+            QMessageBox.information(
+                self, "RPM measurement",
+                "Measurement unavailable for this package. Scan RPM inventory "
+                "to collect allocated-byte measurements.")
+            return
+        measurement = record.measurements[0] if record.measurements else None
+        status = measurement.status.value if measurement else "unknown"
+        details = [
+            record.reference,
+            f"Measurement: {status}",
+            f"Allocated: {format_size(measurement.allocated_bytes if measurement else None)}",
+            f"Known subtotal (not complete size): {format_size(int(record.metadata.get('known_allocated_bytes', '0')))}",
+            f"File count: {record.metadata.get('file_count', '?')}",
+            f"Internal hardlinks: {record.metadata.get('internal_hardlink_paths', '?')}",
+            f"Multi-owned paths: {record.metadata.get('multi_owned_paths', '?')}",
+            f"Missing files: {record.metadata.get('absent_files', '?')}",
+            f"Inaccessible files: {record.metadata.get('inaccessible_files', '?')}",
+            *record.issues,
+            "Read-only. No DNF dependency resolution or reclaimable-space estimate.",
+        ]
+        QMessageBox.information(self, "RPM measurement", "\n".join(details))
+
+    def show_package(self, reference):
+        if self.index is None:
+            return
+        if reference not in self.index.packages:
+            self.heading.setText("Package not found in capability inventory: " + reference)
+            return
+        self.reference = reference
+        view = self.index.view(reference)
+        self.heading.setText(view.package.reference)
+        self.requires_tree.clear()
+        for link in view.requirements:
+            if not link.candidates:
+                QTreeWidgetItem(self.requires_tree, [link.requirement, "No name match / unresolved"])
+            else:
+                for candidate in link.candidates:
+                    item = QTreeWidgetItem(self.requires_tree, [link.requirement, candidate])
+                    item.setData(0, Qt.ItemDataRole.UserRole, candidate)
+        self.reverse_tree.clear()
+        for candidate, capability in view.required_by:
+            item = QTreeWidgetItem(self.reverse_tree, [candidate, capability])
+            item.setData(0, Qt.ItemDataRole.UserRole, candidate)
+        for tree in (self.requires_tree, self.reverse_tree):
+            tree.header().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+            tree.header().setStretchLastSection(True)
+        self.back_button.setEnabled(self.position > 0)
+        self.forward_button.setEnabled(self.position + 1 < len(self.history))
+
+    def navigate_item(self, item, _column):
+        reference = item.data(0, Qt.ItemDataRole.UserRole)
+        if reference and reference != self.reference:
+            self.history = self.history[:self.position + 1] + [reference]
+            self.position += 1
+            self.show_package(reference)
+
+    def back(self):
+        if self.position > 0:
+            self.position -= 1
+            self.show_package(self.history[self.position])
+
+    def forward(self):
+        if self.position + 1 < len(self.history):
+            self.position += 1
+            self.show_package(self.history[self.position])
 
 
 class SnapInventoryDialog(QDialog):
@@ -1482,7 +1633,6 @@ class MainWindow(QMainWindow):
         provider = cell.data(Qt.ItemDataRole.UserRole + 2)
         if provider == "Snap":
             record = self.snap_records[original_index]
-            from PySide6.QtWidgets import QMessageBox
             QMessageBox.information(
                 self, "Snap inventory",
                 f"{record.reference} ({record.metadata.get('state', 'unknown')})\\n"
@@ -1492,22 +1642,14 @@ class MainWindow(QMainWindow):
             return
         if provider == "RPM":
             record = self.rpm_records[original_index]
-            measurement = record.measurements[0] if record.measurements else None
-            status = measurement.status.value if measurement else "unknown"
-            details = [
-                record.reference,
-                f"Measurement: {status}",
-                f"Allocated: {format_size(measurement.allocated_bytes if measurement else None)}",
-                f"Known subtotal (not complete size): {format_size(int(record.metadata.get('known_allocated_bytes', '0')))}",
-                f"File count: {record.metadata.get('file_count', '?')}",
-                f"Internal hardlinks: {record.metadata.get('internal_hardlink_paths', '?')}",
-                f"Multi-owned paths: {record.metadata.get('multi_owned_paths', '?')}",
-                f"Missing files: {record.metadata.get('absent_files', '?')}",
-                f"Inaccessible files: {record.metadata.get('inaccessible_files', '?')}",
-                *record.issues,
-                "Read-only. No RPM dependency analysis or reclaimable-space estimate.",
-            ]
-            QMessageBox.information(self, "RPM package measurement", "\\n".join(details))
+            dialog = RpmDependencyDialog(record.reference, self)
+            dialog.measurements_by_reference = {
+                item.reference: item for item in self.rpm_records
+            }
+            detail_button = QPushButton("Show selected package measurement")
+            detail_button.clicked.connect(dialog.show_measurement)
+            dialog.layout().insertWidget(2, detail_button)
+            dialog.exec()
             return
         item = self.items[original_index]
         if item.kind not in ("runtime", "app"):
