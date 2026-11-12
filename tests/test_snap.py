@@ -81,3 +81,36 @@ def test_snap_probe_daemon_failure(monkeypatch):
         return subprocess.CompletedProcess(args, 1, "", "cannot communicate with server")
     monkeypatch.setattr(provider_detection.subprocess, "run", fake_run)
     assert not probe_snap().available
+
+
+def test_snap_shared_content_is_explicitly_inferred():
+    for name in ("gnome-46-2404", "mesa-2404", "gtk-common-themes"):
+        kind, confidence = module._classification(name, "-")
+        assert kind.value == "runtime"
+        assert confidence == "inferred_shared_content"
+    assert module._classification("core24", "base")[1] == "declared_base_or_system"
+    assert module._classification("kicad", "-")[0].value == "app"
+
+
+def test_snap_storage_cache_and_snapshots_are_independent(tmp_path):
+    from appfootprint.providers.snap_storage import scan_storage
+    root = tmp_path / "snapd"
+    (root / "cache").mkdir(parents=True)
+    (root / "snapshots").mkdir()
+    (root / "cache" / "download").write_bytes(b"x" * 8192)
+    (root / "snapshots" / "saved.zip").write_bytes(b"y" * 4096)
+    storage = scan_storage(root)
+    assert storage.cache.status == MeasurementStatus.MEASURED
+    assert storage.snapshots.status == MeasurementStatus.MEASURED
+    assert storage.cache.allocated_bytes >= storage.snapshots.allocated_bytes
+    assert storage.cache.path.endswith("/cache")
+
+
+def test_snap_storage_absent_and_symlink_safety(tmp_path):
+    from appfootprint.providers.snap_storage import scan_storage
+    root = tmp_path / "snapd"
+    (root / "cache").mkdir(parents=True)
+    (root / "cache" / "link").symlink_to(tmp_path)
+    storage = scan_storage(root)
+    assert storage.cache.status == MeasurementStatus.MEASURED
+    assert storage.snapshots.status == MeasurementStatus.ABSENT
