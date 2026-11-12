@@ -113,7 +113,7 @@ class RpmProvider:
             check_cancel(cancelled)
             if progress:
                 progress(f"Scanning RPM {entry.name} ({index}/{len(entries)})…")
-            known = missing = inaccessible = errors = ambiguous = 0
+            known = missing = inaccessible = errors = multi_owned = shared_inode = 0
             allocated = 0
             seen_paths = set()
             for path in entry.paths:
@@ -132,11 +132,18 @@ class RpmProvider:
                     continue
                 if stat.S_ISDIR(result.st_mode):
                     continue  # Directory contents are not package-owned bytes.
-                if path_owners[path] > 1 or len(inode_owners[(result.st_dev, result.st_ino)]) > 1:
-                    ambiguous += 1
+                # Exclusive categories: if the exact path has multiple RPM
+                # owners, report that first. Only otherwise classify a path
+                # sharing its inode with another distinct path as a hardlink.
+                if path_owners[path] > 1:
+                    multi_owned += 1
+                    continue
+                if len(inode_owners[(result.st_dev, result.st_ino)]) > 1:
+                    shared_inode += 1
                     continue
                 allocated += result.st_blocks * 512
                 known += 1
+            ambiguous = multi_owned + shared_inode
             incomplete = bool(missing or inaccessible or errors or ambiguous)
             status = (MeasurementStatus.INACCESSIBLE if inaccessible else
                       MeasurementStatus.ERROR if incomplete else
@@ -154,7 +161,8 @@ class RpmProvider:
                 issues.append(
                     f"File measurement incomplete: {missing} absent, "
                     f"{inaccessible} inaccessible, {errors} errors, "
-                    f"{ambiguous} ambiguous shared paths/inodes"
+                    f"{multi_owned} multi-owned paths, "
+                    f"{shared_inode} shared-inode paths"
                 )
             records.append(InventoryRecord(
                 provider="rpm", identifier=entry.name, reference=entry.reference,
@@ -168,6 +176,8 @@ class RpmProvider:
                     "inaccessible_files": str(inaccessible),
                     "error_files": str(errors),
                     "ambiguous_files": str(ambiguous),
+                    "multi_owned_paths": str(multi_owned),
+                    "shared_inode_paths": str(shared_inode),
                     "known_allocated_bytes": str(allocated),
                     "classification": "unclassified",
                     "measurement_method": "lstat.st_blocks * 512",
