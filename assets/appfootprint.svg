@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <title>AppFootprint — footprint and storage investigation</title>
+  <defs>
+    <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#124c93"/><stop offset="1" stop-color="#091c46"/></linearGradient>
+    <linearGradient id="foot" x2=".2" y2="1"><stop stop-color="#fff"/><stop offset="1" stop-color="#a8d9fa"/></linearGradient>
+  </defs>
+  <rect x="8" y="8" width="496" height="496" rx="108" fill="url(#bg)"/>
+  <circle cx="256" cy="272" r="164" fill="none" stroke="#28b6c8" stroke-width="40" stroke-dasharray="240 790" transform="rotate(-105 256 272)"/>
+  <circle cx="256" cy="272" r="164" fill="none" stroke="#8a78c4" stroke-width="40" stroke-dasharray="210 820" transform="rotate(10 256 272)"/>
+  <g fill="url(#foot)">
+    <ellipse cx="178" cy="114" rx="23" ry="30" transform="rotate(-20 178 114)"/>
+    <ellipse cx="235" cy="83" rx="26" ry="34" transform="rotate(-10 235 83)"/>
+    <ellipse cx="298" cy="83" rx="30" ry="38" transform="rotate(7 298 83)"/>
+    <ellipse cx="364" cy="114" rx="32" ry="42" transform="rotate(20 364 114)"/>
+    <path d="M179 194 C202 151 280 145 324 190 C367 233 337 272 294 307 C260 335 274 395 240 418 C206 441 159 401 171 356 C185 300 143 258 179 194Z"/>
+  </g>
+  <g transform="translate(298 308)">
+    <rect width="145" height="110" rx="24" fill="#103e7b" stroke="#b4e8ff" stroke-width="12"/>
+    <path d="M32 78V56M68 78V36M104 78V20" stroke="#36d2e5" stroke-width="18" stroke-linecap="round"/>
+  </g>
+</svg>
