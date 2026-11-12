@@ -1,8 +1,8 @@
 # AppFootprint
 
-**Understand the disk footprint of Linux applications.**
+**Understand before you remove.**
 
-AppFootprint is an early-stage, open-source Linux desktop tool that explains where Flatpak application storage is allocated: installed deployments, shared runtimes and extensions, and per-user application data.
+AppFootprint is an early-stage, open-source Linux desktop tool for investigating Flatpak, Snap, RPM and XDG user storage. It reports allocated-file-block observations and explains their limits, without removing data.
 
 Unlike a general disk analyzer, it aims to show **which application a path belongs to**, **which dependencies are shared**, and **what a user should consider before cleaning anything**. Measurements are based on allocated file blocks; they are **not** guaranteed to represent unique physical usage or recoverable space.
 
@@ -427,3 +427,36 @@ Fedora/KDE validation: run `pytest -q`; scan User Storage; double-click
 `~/.cache` and `~/.var/app`; inspect ordering and unknowns; select a
 row and copy the inspection commands; cancel and rescan; ensure other
 provider cards are unaffected.
+
+## Alpha release readiness (PR #24)
+
+The application remains **read-only**. It does not run generated shell
+commands, delete data, elevate privileges, or claim that reported allocated
+bytes equal safely reclaimable space. Btrfs sharing, hardlinks and snapshots
+can make measurements non-additive.
+
+Hover over measured sizes in the main inventory, User Storage and Storage
+Investigator to see exact byte counts; unknown values remain unknown and
+partial measurements show a clearly labeled known subtotal.
+
+### Pre-release acceptance checklist
+
+1. Run `python -m pytest -q` on a clean source checkout.
+2. Run `python -m compileall -q src/appfootprint`.
+3. Launch as an unprivileged user on Fedora KDE; scan Flatpak, Snap, RPM
+   and XDG user storage, and check that the existing totals do not change.
+4. Confirm exact-byte tooltips, including unknown and incomplete cases.
+5. Cancel and restart each available scan; inspect the RPM explorer and
+   the Storage Investigator's copy-only `du`/`find` commands.
+6. Check window resizing, KDE light/dark themes and text readability.
+7. Before publishing an AppImage, build it in a controlled older Linux
+   environment, verify runtime compatibility and test on Fedora KDE.
+   A build passing unit tests alone does **not** establish AppImage portability.
+8. Publish alpha releases with a SHA256 checksum, documented supported
+   architectures and distributions, and a clear warning about experimental
+   inventory coverage.
+
+Future CI workflows should test on pull requests, create downloadable
+build artifacts on demand, and publish GitHub Releases only for explicitly
+approved version tags. Package-manager CLI tools remain host dependencies;
+they should not be bundled as substitute system package databases.
