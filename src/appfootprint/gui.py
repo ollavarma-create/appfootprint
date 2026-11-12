@@ -19,6 +19,7 @@ from .extensions import compatible_extension, parse_extension_points
 from .navigation import NavigationHistory, history_labels
 from .scanner import Item, ScanCancelled, allocated_size, direct_runtime_users, runtime_extension_hint, format_size, scan
 from .advisor import assess_path, space_significance
+from .provider_detection import ProviderStatus, detect_providers
 
 
 def total_bytes(item: Item) -> int | None:
@@ -70,6 +71,20 @@ class ScanThread(QThread):
         except Exception as exc:
             items, issues = [], [f"Scan failed: {exc}"]
         self.finished_scan.emit(items, issues)
+
+
+class ProviderProbeThread(QThread):
+    """Check CLI availability without blocking Qt's event loop."""
+    detected = Signal(object)
+
+    def run(self) -> None:
+        try:
+            statuses = detect_providers()
+        except Exception as exc:
+            statuses = {"flatpak": ProviderStatus(
+                "flatpak", False, f"Provider detection failed: {exc}"
+            )}
+        self.detected.emit(statuses)
 
 
 class DirectoryTreeItem(QTreeWidgetItem):
@@ -575,19 +590,20 @@ class NavigationDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("AppFootprint — Flatpak inventory (alpha)")
+        self.setWindowTitle("AppFootprint — Storage inventory (alpha)")
         self.resize(1200, 650)
         self.items: list[Item] = []
         container = QWidget()
         layout = QVBoxLayout(container)
-        self.info = QLabel(
-            "Read-only inventory. Totals exclude shared runtimes. "
-            "Double-click an application to explore user data, or a runtime for an explanation."
-        )
+        self.info = QLabel("No inventory yet. Choose an available provider to start a read-only scan.")
         self.info.setWordWrap(True)
         layout.addWidget(self.info)
+        self.provider_status = QLabel("Checking available package providers…")
+        self.provider_status.setWordWrap(True)
+        layout.addWidget(self.provider_status)
         self.button = QPushButton("Scan Flatpak installations")
         self.button.clicked.connect(self.start_scan)
+        self.button.hide()  # Only reveal after the provider probe succeeds.
         layout.addWidget(self.button)
         self.cancel_button = QPushButton("Cancel scan")
         self.cancel_button.clicked.connect(self.cancel_scan)
@@ -618,8 +634,30 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.table)
         self.setCentralWidget(container)
         self.worker: ScanThread | None = None
+        self._flatpak_available = False
+        self.probe = ProviderProbeThread(self)
+        self.probe.detected.connect(self.providers_detected)
+        self.probe.start()
+
+    def providers_detected(self, statuses: dict[str, ProviderStatus]) -> None:
+        flatpak = statuses.get("flatpak")
+        self._flatpak_available = bool(flatpak and flatpak.available)
+        self.button.setVisible(self._flatpak_available)
+        if self._flatpak_available:
+            self.provider_status.setText(
+                f"Flatpak available ({flatpak.version or 'version unknown'}). "
+                "Snap and RPM scanners are not implemented yet."
+            )
+        else:
+            reason = flatpak.reason if flatpak else "Flatpak provider not detected."
+            self.provider_status.setText(
+                "No supported package provider is available. "
+                f"{reason} Snap and RPM scanners are not implemented yet."
+            )
 
     def start_scan(self) -> None:
+        if not self._flatpak_available:
+            return
         if self.worker and self.worker.isRunning():
             return
         self.button.setEnabled(False)
@@ -643,7 +681,10 @@ class MainWindow(QMainWindow):
 
     def scan_was_cancelled(self) -> None:
         # Keep the last completed results rather than showing partial data.
-        self.info.setText("Scan cancelled. Previous results retained; no files modified.")
+        self.info.setText(
+            "Scan cancelled. Previous results retained; no files modified. "
+            + (self._explore_hint() if self.items else "")
+        )
 
     def show_progress(self, message: str) -> None:
         if self.worker and not self.worker._cancel.is_set():
@@ -654,6 +695,11 @@ class MainWindow(QMainWindow):
         self.progress.hide()
         self.button.setText("Scan Flatpak installations")
         self.button.setEnabled(True)
+
+    @staticmethod
+    def _explore_hint() -> str:
+        return ("Double-click an application to explore user data, or a runtime "
+                "to examine shared dependencies.")
 
     def show_results(self, items: list[Item], issues: list[str]) -> None:
         self.items = items
@@ -679,6 +725,10 @@ class MainWindow(QMainWindow):
             f"{len(items)} Flatpak records. App total = installed + user data; "
             "shared runtimes excluded. No files modified."
         )
+        if items:
+            summary += " " + self._explore_hint()
+        else:
+            summary += " No entries found."
         if issues:
             summary += " Issues: " + "; ".join(issues)
         self.info.setText(summary)
