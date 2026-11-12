@@ -105,6 +105,7 @@ The roadmap includes broader Linux packaging support, browser/site storage analy
 
 - [Architecture](docs/architecture.md)
 - [Roadmap](docs/roadmap.md)
+- [Measurement limitations](docs/limitations.md)
 
 ## License
 
