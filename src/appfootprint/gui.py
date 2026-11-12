@@ -992,9 +992,14 @@ class MainWindow(QMainWindow):
         # One column when narrow; otherwise put provider cards side by side.
         # A future RPM card can join this list without changing the layout model.
         columns = 1 if self.width() < 820 else min(3, max(1, len(cards)))
-        if columns == self._overview_columns and all(
-            self.overview_grid.indexOf(card) >= 0 for card in cards
-        ):
+        all_cards = (self.flatpak_card, self.snap_card)
+        # Check exact membership, not only whether currently available
+        # cards are present: an unavailable provider may still be in the grid.
+        current_cards = {
+            card for card in all_cards
+            if self.overview_grid.indexOf(card) >= 0
+        }
+        if columns == self._overview_columns and current_cards == set(cards):
             return
         self._overview_columns = columns
         for card in (self.flatpak_card, self.snap_card):
