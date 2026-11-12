@@ -91,9 +91,25 @@ def _user_size(path: Path, cancelled: Callable[[], bool] | None) -> StorageMeasu
                                   path=str(path), reason=str(exc))
 
 
-def _kind(name: str, notes: str) -> PackageKind:
+def _classification(name: str, notes: str) -> tuple[PackageKind, str]:
+    """Distinguish Snap-declared bases from *inferred* shared content snaps.
+
+    snap list does not expose content interface declarations. These familiar
+    naming families are heuristics and must be labelled as such.
+    """
     tokens = set(notes.split(","))
-    return PackageKind.RUNTIME if ("base" in tokens or name in {"core", "core18", "core20", "core22", "core24", "core26", "snapd", "bare"}) else PackageKind.APPLICATION
+    if "base" in tokens or name in {"core", "core18", "core20", "core22",
+                                    "core24", "core26", "snapd", "bare"}:
+        return PackageKind.RUNTIME, "declared_base_or_system"
+    if (re.fullmatch(r"gnome-\\d+-\\d+", name) or
+            re.fullmatch(r"mesa-\\d+", name) or
+            name == "gtk-common-themes"):
+        return PackageKind.RUNTIME, "inferred_shared_content"
+    return PackageKind.APPLICATION, "unverified_application"
+
+
+def _kind(name: str, notes: str) -> PackageKind:
+    return _classification(name, notes)[0]
 
 
 class SnapProvider:
@@ -126,7 +142,7 @@ class SnapProvider:
             check_cancel(cancelled)
             if progress:
                 progress(f"Scanning Snap {entry.name} revision {entry.revision} ({index}/{len(entries)})…")
-            kind = _kind(entry.name, entry.notes)
+            kind, classification = _classification(entry.name, entry.notes)
             image = self.image_dir / f"{entry.name}_{entry.revision}.snap"
             image_measure = _size(image, cancelled)
             if kind == PackageKind.RUNTIME:
@@ -147,7 +163,8 @@ class SnapProvider:
                 reference=f"{entry.name}/{entry.revision}", scope="system",
                 kind=kind, measurements=tuple(measurements),
                 metadata={"version": entry.version, "revision": entry.revision,
-                          "notes": entry.notes, "state": "active" if entry.active else "disabled"},
+                          "notes": entry.notes, "state": "active" if entry.active else "disabled",
+                          "classification": classification},
             ))
         check_cancel(cancelled)
         return records, []
