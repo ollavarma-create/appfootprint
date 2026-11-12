@@ -899,6 +899,7 @@ class MainWindow(QMainWindow):
         self.snap_storage = None
         self._flatpak_available = False
         self._snap_available = False
+        self._rpm_available = False
         self._scan_state = {"Flatpak": "not_scanned", "Snap": "not_scanned", "RPM": "not_scanned"}
         self._scan_time = {"Flatpak": None, "Snap": None, "RPM": None}
         self._scan_count = {"Flatpak": 0, "Snap": 0, "RPM": 0}
@@ -1231,6 +1232,46 @@ class MainWindow(QMainWindow):
         ) else "issues" if issues else "scanned")
         self._update_scan_labels()
 
+    def start_rpm_scan(self) -> None:
+        if not self._rpm_available or any(
+            worker is not None and worker.isRunning()
+            for worker in (self.worker, self.snap_worker, self.rpm_worker)
+        ):
+            return
+        for button in (self.button, self.snap_button, self.rpm_button):
+            button.setEnabled(False)
+        self.cancel_button.setEnabled(True)
+        self.cancel_button.show()
+        self.progress.show()
+        self._scan_state["RPM"] = "scanning"
+        self._scan_progress["RPM"] = "Reading RPM inventory… (read-only)"
+        self._update_scan_labels()
+        self.rpm_worker = RpmScanThread(self)
+        self.rpm_worker.progress_changed.connect(self.show_rpm_progress)
+        self.rpm_worker.finished_scan.connect(self.show_rpm_results)
+        self.rpm_worker.scan_cancelled.connect(self.scan_was_cancelled)
+        self.rpm_worker.finished.connect(self.finish_rpm_scan)
+        self.rpm_worker.start()
+
+    def show_rpm_progress(self, message: str) -> None:
+        if self.rpm_worker and not self.rpm_worker._cancel.is_set():
+            self._scan_progress["RPM"] = message + " (read-only)"
+            self._update_scan_labels()
+
+    def show_rpm_results(self, records, issues) -> None:
+        self.rpm_records = records
+        self._rpm_issues = list(issues)
+        self._scan_completed("RPM", len(records), self._rpm_issues)
+        self.update_overviews()
+        self.render_inventory()
+
+    def finish_rpm_scan(self) -> None:
+        self.cancel_button.hide()
+        self.progress.hide()
+        for button in (self.button, self.snap_button, self.rpm_button):
+            button.setEnabled(True)
+        self._update_scan_labels()
+
     def open_snap_inventory(self) -> None:
         self.start_snap_scan()
 
@@ -1239,6 +1280,9 @@ class MainWindow(QMainWindow):
             return
         if self.worker and self.worker.isRunning():
             return
+        if self.rpm_worker and self.rpm_worker.isRunning():
+            return
+        self.rpm_button.setEnabled(False)
         self.snap_button.setEnabled(False)
         self.button.setEnabled(False)
         self.cancel_button.setEnabled(True)
@@ -1267,6 +1311,7 @@ class MainWindow(QMainWindow):
         self.progress.hide()
         self.snap_button.setEnabled(True)
         self.button.setEnabled(True)
+        self.rpm_button.setEnabled(True)
         self._update_scan_labels()
 
     def start_scan(self) -> None:
@@ -1276,7 +1321,11 @@ class MainWindow(QMainWindow):
             return
         if self.snap_worker and self.snap_worker.isRunning():
             return
+        if self.rpm_worker and self.rpm_worker.isRunning():
+            return
+        self.rpm_button.setEnabled(False)
         self.snap_button.setEnabled(False)
+        self.rpm_button.setEnabled(False)
         self.button.setEnabled(False)
         self._scan_progress["Flatpak"] = "Scanning applications and user data… (read-only)"
         self._scan_state["Flatpak"] = "scanning"
@@ -1293,6 +1342,9 @@ class MainWindow(QMainWindow):
         self.worker.start()
 
     def cancel_scan(self) -> None:
+        if self.rpm_worker and self.rpm_worker.isRunning():
+            self.rpm_worker.cancel()
+            self.cancel_button.setEnabled(False)
         if self.snap_worker and self.snap_worker.isRunning():
             self.snap_worker.cancel()
             self.cancel_button.setEnabled(False)
@@ -1302,8 +1354,8 @@ class MainWindow(QMainWindow):
             self.info.setText("Cancelling scan… waiting for current operation.")
 
     def scan_was_cancelled(self) -> None:
-        provider = ("Snap" if self._scan_state["Snap"] == "scanning"
-                    else "Flatpak")
+        provider = next((name for name in ("RPM", "Snap", "Flatpak")
+                         if self._scan_state[name] == "scanning"), "Flatpak")
         self._scan_state[provider] = "cancelled"
         self._scan_progress[provider] = ""
         self._update_scan_labels()
@@ -1328,6 +1380,7 @@ class MainWindow(QMainWindow):
         self.progress.hide()
         self.button.setEnabled(True)
         self.snap_button.setEnabled(True)
+        self.rpm_button.setEnabled(True)
         self._update_scan_labels()
 
     @staticmethod
@@ -1351,11 +1404,12 @@ class MainWindow(QMainWindow):
             visible = ((source == "All" or source == provider) and
                        (category == "All" or
                         (category == "Applications" and kind == "app") or
-                        (category == "Shared components" and kind != "app")))
+                        (category == "Shared components" and kind not in ("app", "rpm")) or
+                        (category == "RPM packages" and kind == "rpm")))
             self.table.setRowHidden(row, not visible)
 
     def render_inventory(self) -> None:
-        rows = combine(self.items, self.snap_records)
+        rows = combine(self.items, self.snap_records, self.rpm_records)
         self.table.setSortingEnabled(False)
         self.table.setRowCount(len(rows))
         for row, record in enumerate(rows):
@@ -1387,7 +1441,7 @@ class MainWindow(QMainWindow):
             painter = QPainter(marker)
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QColor("#278b89" if record.provider == "Flatpak"
-                                    else "#bf7837"))
+                                    else "#8b78bd" if record.provider == "RPM" else "#bf7837"))
             painter.drawRoundedRect(1, 1, 7, 14, 2, 2)
             painter.end()
             source.setIcon(QIcon(marker))
@@ -1398,7 +1452,7 @@ class MainWindow(QMainWindow):
         message = (f"{len(self.items)} Flatpak records; {len(self.snap_records)} "
                    "Snap revisions. Shared components excluded from application "
                    "totals; unknown measurements are not zero. Read-only.")
-        issues = self._flatpak_issues + self._snap_issues
+        issues = self._flatpak_issues + self._snap_issues + self._rpm_issues
         if issues:
             message += " Issues: " + "; ".join(issues)
         if self.items:
