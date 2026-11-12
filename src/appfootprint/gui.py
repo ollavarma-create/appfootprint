@@ -8,7 +8,7 @@ from pathlib import Path
 from collections.abc import Callable
 
 from PySide6.QtCore import QObject, QRunnable, QThread, QThreadPool, Signal, Qt, QUrl
-from PySide6.QtGui import QDesktopServices, QColor, QBrush
+from PySide6.QtGui import QDesktopServices, QColor, QPixmap, QIcon
 from PySide6.QtWidgets import (
     QApplication, QDialog, QDialogButtonBox, QHeaderView, QLabel, QMenu,
     QMainWindow, QProgressBar, QPushButton, QScrollArea, QStackedWidget, QHBoxLayout, QComboBox, QTableWidget, QTableWidgetItem,
@@ -1009,9 +1009,19 @@ class MainWindow(QMainWindow):
                 cell.setData(Qt.ItemDataRole.UserRole + 2, record.provider)
                 self.table.setItem(row, col, cell)
             source = self.table.item(row, 9)
-            source.setText("● " + record.provider)
-            source.setForeground(QBrush(QColor("#278b89" if record.provider == "Flatpak"
-                                               else "#bf7837")))
+            # Only the marker is colored. Text and row selection remain
+            # controlled by the active Qt/KDE palette (including dark mode).
+            source.setText(record.provider)
+            marker = QPixmap(9, 16)
+            marker.fill(Qt.GlobalColor.transparent)
+            from PySide6.QtGui import QPainter
+            painter = QPainter(marker)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor("#278b89" if record.provider == "Flatpak"
+                                    else "#bf7837"))
+            painter.drawRoundedRect(1, 1, 7, 14, 2, 2)
+            painter.end()
+            source.setIcon(QIcon(marker))
             source.setToolTip(record.provider + " package manager")
         self.table.setSortingEnabled(True)
         self.table.sortItems(6, Qt.SortOrder.DescendingOrder)
