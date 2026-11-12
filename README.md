@@ -145,3 +145,15 @@ Flatpak rows retain their existing double-click dependency and storage
 explorer. Snap rows currently show a basic read-only details message;
 Snap-specific dependency navigation is not yet implemented. The legacy
 Snap detail dialog remains in code while the unified interface is tested.
+
+### Scan state and freshness
+
+Each available provider shows its own scan state independently of CLI
+availability: **Not scanned**, **Scanning**, **Scanned**, **Scanned with
+issues**, **Scan failed**, or **Cancelled**. A completed scan shows the
+number of records (including zero) and the local completion time. The action
+changes from **Scan** to **Rescan** after a completed scan. Cancellation
+preserves the last completed results. Snap may additionally display
+**Partial coverage** when protected cache or snapshot directories cannot
+be measured; a completed scan never implies full filesystem coverage.
+No elevated privileges are requested.
