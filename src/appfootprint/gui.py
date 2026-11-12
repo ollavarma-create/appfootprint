@@ -1032,7 +1032,7 @@ class MainWindow(QMainWindow):
             )
         else:
             details.append(self._explore_hint())
-        return "\\n\\n".join(details)
+        return "\n\n".join(details)
 
     def show_provider_information(self, provider: str) -> None:
         QMessageBox.information(
