@@ -278,3 +278,29 @@ def test_overview_updates_per_provider_without_conflating_snap_storage(monkeypat
     assert "2 unknown" in window.snap_overview.coverage.text()
     assert "0.0 B" in window.snap_overview.heading.text()
     window.close()
+
+
+def test_provider_cards_adapt_and_hide_unavailable(monkeypatch):
+    from appfootprint.provider_detection import ProviderStatus
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(gui.ProviderProbeThread, "start", lambda self: None)
+    window = gui.MainWindow()
+    statuses = {
+        "flatpak": ProviderStatus("flatpak", True, "ok", "1.18"),
+        "snap": ProviderStatus("snap", True, "ok", "2.78"),
+    }
+    window.providers_detected(statuses)
+    assert window.overview_grid.indexOf(window.flatpak_card) >= 0
+    assert window.overview_grid.indexOf(window.snap_card) >= 0
+    assert window.button.parentWidget() is window.flatpak_card
+    assert window.snap_button.parentWidget() is window.snap_card
+    window.resize(1100, 700)
+    assert window.overview_grid.itemAtPosition(0, 0).widget() is window.flatpak_card
+    assert window.overview_grid.itemAtPosition(0, 1).widget() is window.snap_card
+    window.resize(700, 700)
+    assert window.overview_grid.itemAtPosition(1, 0).widget() is window.snap_card
+    statuses["snap"] = ProviderStatus("snap", False, "missing", None)
+    window.providers_detected(statuses)
+    assert window.overview_grid.indexOf(window.snap_card) == -1
+    assert window.overview_grid.indexOf(window.flatpak_card) >= 0
+    window.close()
