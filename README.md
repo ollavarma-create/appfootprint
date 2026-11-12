@@ -190,3 +190,12 @@ bar colors and the limitations of the target counts. The detailed table
 and its source/type filters remain below the cards. All colors used for
 measurements have textual labels and are independent of package-source
 colors.
+
+### Compact provider information (PR #17 refinement)
+
+The provider version appears in the Flatpak or Snap card title. A keyboard-
+accessible **ⓘ** button on each card opens a dialog with scan details, the
+read-only policy, measurement caveats, and (for Snap) cache/snapshot access
+limitations. The same button has a hover tooltip. This replaces the three
+long explanatory lines above the overview; scan progress and issue state
+remain visible in the cards. The shared bar legend stays visible.
