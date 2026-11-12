@@ -481,3 +481,34 @@ Fedora/KDE acceptance: `pytest -q`; investigate
 Back/Forward and verify the displayed path, double-click a regular file
 (no navigation), copy a selected path, test a symlink, cancel/rescan and
 verify no provider totals change.
+
+## Experimental AppImage build (PR #26)
+
+The GitHub Actions workflow **AppImage build (experimental)** can be started
+manually from the Actions tab (`workflow_dispatch`) and runs on relevant pull
+requests. It uses Ubuntu 22.04 x86_64 as an initial older-glibc baseline,
+Python 3.11, Nuitka standalone and appimagetool. It runs unit tests before
+building, then uploads a downloadable AppImage and SHA256 file as **workflow
+artifacts**, not as a public GitHub Release.
+
+The AppImage includes the Python application, PySide6/Qt and desktop
+integration. The `rpm`, `flatpak` and `snap` CLIs, when available, are
+provided by the target system. It remains a read-only application.
+
+The initial scalable SVG is a packaging-compatible **temporary vector
+interpretation** of the approved footprint artwork. The approved generated
+raster icon should replace it in a follow-up packaging commit before release.
+Do not assume the SVG reproduces the original artwork.
+
+Download the two artifacts and check them on a Fedora KDE machine:
+
+```bash
+sha256sum -c AppFootprint-x86_64.AppImage.sha256
+chmod +x AppFootprint-x86_64.AppImage
+./AppFootprint-x86_64.AppImage
+```
+
+Test Flatpak/Snap/RPM scans, User Storage and nested Storage Investigator,
+Back/Forward, copy-only commands, the KDE launcher/icon and window behavior.
+Try a second distribution with an older glibc before claiming portability.
+The first successful CI build is **not** a release or compatibility guarantee.
