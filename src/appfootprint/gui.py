@@ -1490,6 +1490,25 @@ class MainWindow(QMainWindow):
                 "No files modified."
             )
             return
+        if provider == "RPM":
+            record = self.rpm_records[original_index]
+            measurement = record.measurements[0] if record.measurements else None
+            status = measurement.status.value if measurement else "unknown"
+            details = [
+                record.reference,
+                f"Measurement: {status}",
+                f"Allocated: {format_size(measurement.allocated_bytes if measurement else None)}",
+                f"Known subtotal (not complete size): {format_size(int(record.metadata.get('known_allocated_bytes', '0')))}",
+                f"File count: {record.metadata.get('file_count', '?')}",
+                f"Internal hardlinks: {record.metadata.get('internal_hardlink_paths', '?')}",
+                f"Multi-owned paths: {record.metadata.get('multi_owned_paths', '?')}",
+                f"Missing files: {record.metadata.get('absent_files', '?')}",
+                f"Inaccessible files: {record.metadata.get('inaccessible_files', '?')}",
+                *record.issues,
+                "Read-only. No RPM dependency analysis or reclaimable-space estimate.",
+            ]
+            QMessageBox.information(self, "RPM package measurement", "\\n".join(details))
+            return
         item = self.items[original_index]
         if item.kind not in ("runtime", "app"):
             return
