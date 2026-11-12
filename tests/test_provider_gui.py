@@ -190,3 +190,40 @@ def test_unified_size_columns_sort_with_unknown_and_not_applicable(monkeypatch):
     assert any(window.table.item(row, 5).text() == "Not applicable"
                for row in range(window.table.rowCount()))
     window.close()
+
+
+def test_provider_scan_status_and_rescan_labels(monkeypatch):
+    from appfootprint.provider_detection import ProviderStatus
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(gui.ProviderProbeThread, "start", lambda self: None)
+    window = gui.MainWindow()
+    window.providers_detected({
+        "flatpak": ProviderStatus("flatpak", True, "ok", "1.18"),
+        "snap": ProviderStatus("snap", True, "ok", "2.78"),
+    })
+    assert "Not scanned" in window.flatpak_scan_status.text()
+    assert "Not scanned" in window.snap_scan_status.text()
+    window.show_results([], [])
+    assert "Scanned" in window.flatpak_scan_status.text()
+    assert "0 records" in window.flatpak_scan_status.text()
+    assert "Rescan Flatpak" in window.button.text()
+    assert "Not scanned" in window.snap_scan_status.text()
+    window.show_snap_results([], [], None)
+    assert "Partial coverage" in window.snap_scan_status.text()
+    assert "Rescan Snap" in window.snap_button.text()
+    window._scan_state["Snap"] = "scanning"
+    window.scan_was_cancelled()
+    assert "Cancelled" in window.snap_scan_status.text()
+    assert "previous results retained" in window.snap_scan_status.text()
+    window.close()
+
+
+def test_provider_scan_with_issues_and_failed_state(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(gui.ProviderProbeThread, "start", lambda self: None)
+    window = gui.MainWindow()
+    window.show_results([], ["some entries inaccessible"])
+    assert "Scanned with issues" in window.flatpak_scan_status.text()
+    window.show_results([], ["Scan failed: unavailable"])
+    assert "Scan failed" in window.flatpak_scan_status.text()
+    window.close()
