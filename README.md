@@ -404,3 +404,26 @@ Validation: run `pytest -q`, launch the GUI, open User Storage, scan
 and compare selected directory values with `du -B1` (differences can arise
 from inode handling and filesystem accounting). Check cancellation, symlinks,
 permission failures, and that the existing three provider cards do not change.
+
+### Storage Investigator (PR #23, experimental)
+
+After scanning **User Storage**, double-click a measured XDG directory
+to inspect its immediate children. The read-only investigator measures
+each child subtree separately, sorts by reported allocated bytes, and
+shows incomplete measurements as unknown with a known subtotal.
+Symlinks are measured as links, not traversed; different filesystems
+are excluded. The scan is cancellable.
+
+Selecting a child shows two **copy-only** shell inspection examples
+(`du` and `find`) with safely quoted paths. AppFootprint never
+executes these commands or generates deletion commands. No automatic
+judgment about whether a cache or application data can be removed.
+
+Each child is independently measured, so shared hardlinks across
+children, Btrfs reflinks and snapshots can overlap. **Do not sum
+child measurements as physically unique or reclaimable bytes.**
+
+Fedora/KDE validation: run `pytest -q`; scan User Storage; double-click
+`~/.cache` and `~/.var/app`; inspect ordering and unknowns; select a
+row and copy the inspection commands; cancel and rescan; ensure other
+provider cards are unaffected.
