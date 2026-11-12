@@ -50,7 +50,7 @@ jobs:
             -o /tmp/appimagetool.AppImage
           chmod +x /tmp/appimagetool.AppImage
           /tmp/appimagetool.AppImage --appimage-extract >/dev/null
-          sudo install -m 0755 squashfs-root/AppRun /usr/local/bin/appimagetool
+          sudo install -m 0755 squashfs-root/usr/bin/appimagetool /usr/local/bin/appimagetool
       - name: Build AppImage
         run: bash scripts/build-appimage.sh
       - name: Check output
