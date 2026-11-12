@@ -356,3 +356,28 @@ Test with `pytest -q`; on Fedora open an RPM row (e.g. NetworkManager),
 check capability lists, navigate to a candidate and Back, and verify the
 measurement-details button. A database query may take a moment; closing the
 dialog waits for the worker to finish rather than destroying a running thread.
+
+### UI consistency pass (PR #21)
+
+Provider cards use concise titles (for example `Flatpak (1.18.4)`,
+`Snap (2.77.1-0.fc44)`, `RPM (6.0.2)`) without repeating provider
+names or RPM's `version` prefix. The unified inventory column
+`Package / application ID` applies to all three providers.
+Provider information controls have a larger minimum click target.
+
+This is a **presentation-only** change. It does not modify scan results,
+measurement arithmetic, dependency matching, or deletion behavior.
+
+#### Fedora/KDE manual regression checklist
+
+1. Run `pytest -q`; verify provider-title tests pass.
+2. Launch the GUI at a normal desktop width and narrow it below 820px;
+   verify cards wrap, remain readable and the info buttons stay clickable.
+3. Scan Flatpak, Snap and RPM; verify each provider's counts, measured
+   bytes and unknown counts match the pre-upgrade build.
+4. Sort/filter the unified inventory by source and kind; check the
+   neutral column label and row double-click actions.
+5. In the RPM explorer, navigate forward/back and open measurement
+   details for the currently selected package.
+6. Cancel and rerun a scan; verify the UI recovers and remains responsive.
+7. Check KDE light/dark themes and scaling (100% and 125% where available).
