@@ -107,11 +107,15 @@ def test_investigator_clears_stale_commands_on_navigation(tmp_path, monkeypatch)
     """Navigation must not display commands from the previously selected path."""
     from PySide6.QtWidgets import QApplication, QTableWidgetItem
     from appfootprint.gui import StorageInvestigatorDialog
+    import appfootprint.gui as gui
 
     app = QApplication.instance() or QApplication([])
     root = tmp_path / ".cache"
     child = root / "child"
     child.mkdir(parents=True)
+    # Use the synthetic home for XDG scope validation, not the real user home.
+    monkeypatch.setattr(gui, "allowed_directory",
+                        lambda path: allowed_directory(path, tmp_path))
     # Keep this GUI regression deterministic: no background scan needed.
     monkeypatch.setattr(StorageInvestigatorDialog, "start_scan", lambda self: None)
     dialog = StorageInvestigatorDialog(root)
