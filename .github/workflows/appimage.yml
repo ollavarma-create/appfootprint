@@ -20,6 +20,7 @@ jobs:
     timeout-minutes: 60
     env:
       QT_QPA_PLATFORM: offscreen
+      VIRTUAL_ENV: ${{ github.workspace }}/.build-venv
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -34,14 +35,15 @@ jobs:
             libxcb-cursor0 libxcb-xinerama0 libxcb-icccm4 \
             libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
             libxcb-render-util0 libxcb-shape0 libxcb-xfixes0
-          python -m pip install --upgrade pip
-          python -m pip install -e '.[dev]'
-          python -m pip install 'PySide6==6.8.3' 'Nuitka==2.7.12' 'ordered-set' 'zstandard'
-          python -m pip check
+          python -m venv "$VIRTUAL_ENV"
+          "$VIRTUAL_ENV/bin/python" -m pip install --upgrade pip
+          "$VIRTUAL_ENV/bin/python" -m pip install 'PySide6==6.8.3' 'Nuitka==2.7.12' 'ordered-set' 'zstandard'
+          "$VIRTUAL_ENV/bin/python" -m pip install -e '.[dev]'
+          "$VIRTUAL_ENV/bin/python" -m pip check
       - name: Unit tests
         run: |
-          python -m pytest -q
-          python -m compileall -q src/appfootprint
+          "$VIRTUAL_ENV/bin/python" -m pytest -q
+          "$VIRTUAL_ENV/bin/python" -m compileall -q src/appfootprint
       - name: Desktop metadata
         run: desktop-file-validate packaging/appfootprint.desktop
       - name: Install appimagetool
@@ -53,7 +55,9 @@ jobs:
           /tmp/appimagetool.AppImage --appimage-extract >/dev/null
           sudo install -m 0755 squashfs-root/usr/bin/appimagetool /usr/local/bin/appimagetool
       - name: Build AppImage
-        run: bash scripts/build-appimage.sh
+        run: |
+          export PATH="$VIRTUAL_ENV/bin:$PATH"
+          bash scripts/build-appimage.sh
       - name: Check output
         run: |
           test -s dist/AppFootprint-x86_64.AppImage
