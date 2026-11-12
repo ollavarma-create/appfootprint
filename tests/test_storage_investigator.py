@@ -124,6 +124,7 @@ def test_investigator_clears_stale_commands_on_navigation(tmp_path, monkeypatch)
     dialog.table.setCurrentCell(0, 4)
     assert str(child) in dialog.commands.text()
     dialog.navigate_to(child)
+    assert dialog.history.current == child
     assert dialog.commands.text() == "Select a row to see inspection commands"
     assert not dialog.copy_button.isEnabled()
     assert not dialog.copy_path_button.isEnabled()
