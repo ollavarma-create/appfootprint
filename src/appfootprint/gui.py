@@ -869,6 +869,18 @@ class MainWindow(QMainWindow):
         self.probe.detected.connect(self.providers_detected)
         self.probe.start()
 
+    def closeEvent(self, event):
+        # Keep worker-owned Qt objects alive until scans stop.
+        running = [worker for worker in (self.worker, self.snap_worker)
+                   if worker is not None and worker.isRunning()]
+        if running:
+            for worker in running:
+                worker.cancel()
+            self.info.setText("Cancelling active scans before closing…")
+            event.ignore()
+            return
+        super().closeEvent(event)
+
     def providers_detected(self, statuses: dict[str, ProviderStatus]) -> None:
         flatpak = statuses.get("flatpak")
         snap = statuses.get("snap")
