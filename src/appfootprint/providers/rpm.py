@@ -96,6 +96,11 @@ class RpmProvider:
             for path in set(entry.paths):
                 path_owners[path] = path_owners.get(path, 0) + 1
         inode_owners: dict[tuple[int, int], set[str]] = {}
+        # Identity is the full installed NEVRA, not the display name.
+        path_package_owners: dict[str, set[str]] = {}
+        for entry in entries:
+            for path in set(entry.paths):
+                path_package_owners.setdefault(path, set()).add(entry.reference)
         path_stats: dict[str, os.stat_result | OSError] = {}
         for index, path in enumerate(path_owners):
             check_cancel(cancelled)
@@ -114,8 +119,10 @@ class RpmProvider:
             if progress:
                 progress(f"Scanning RPM {entry.name} ({index}/{len(entries)})…")
             known = missing = inaccessible = errors = multi_owned = shared_inode = 0
+            internal_hardlinks = cross_package_hardlinks = 0
             allocated = 0
             seen_paths = set()
+            counted_inodes: set[tuple[int, int]] = set()
             for path in entry.paths:
                 check_cancel(cancelled)
                 if path in seen_paths:
@@ -138,9 +145,22 @@ class RpmProvider:
                 if path_owners[path] > 1:
                     multi_owned += 1
                     continue
-                if len(inode_owners[(result.st_dev, result.st_ino)]) > 1:
+                inode_key = (result.st_dev, result.st_ino)
+                inode_paths = inode_owners[inode_key]
+                inode_packages = set().union(
+                    *(path_package_owners[p] for p in inode_paths)
+                )
+                if len(inode_packages) > 1:
+                    # An inode spanning different packages cannot be
+                    # attributed exclusively to this package.
                     shared_inode += 1
+                    cross_package_hardlinks += 1
                     continue
+                if inode_key in counted_inodes:
+                    # Same-package hardlinks occupy one inode: count once.
+                    internal_hardlinks += 1
+                    continue
+                counted_inodes.add(inode_key)
                 allocated += result.st_blocks * 512
                 known += 1
             ambiguous = multi_owned + shared_inode
@@ -162,7 +182,7 @@ class RpmProvider:
                     f"File measurement incomplete: {missing} absent, "
                     f"{inaccessible} inaccessible, {errors} errors, "
                     f"{multi_owned} multi-owned paths, "
-                    f"{shared_inode} shared-inode paths"
+                    f"{shared_inode} cross-package shared-inode paths"
                 )
             records.append(InventoryRecord(
                 provider="rpm", identifier=entry.name, reference=entry.reference,
@@ -178,6 +198,8 @@ class RpmProvider:
                     "ambiguous_files": str(ambiguous),
                     "multi_owned_paths": str(multi_owned),
                     "shared_inode_paths": str(shared_inode),
+                    "cross_package_hardlink_paths": str(cross_package_hardlinks),
+                    "internal_hardlink_paths": str(internal_hardlinks),
                     "known_allocated_bytes": str(allocated),
                     "classification": "unclassified",
                     "measurement_method": "lstat.st_blocks * 512",
