@@ -1541,10 +1541,17 @@ class MainWindow(QMainWindow):
         self.table.setWordWrap(False)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.table.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.ResizeToContents
-        )
-        self.table.horizontalHeader().setStretchLastSection(True)
+        # ResizeToContents rescans thousands of RPM rows on each model
+        # dataChanged signal, freezing the GUI during Flatpak rescans.
+        # Use predictable interactive widths instead.
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setDefaultSectionSize(140)
+        header.resizeSection(0, 95)
+        header.resizeSection(1, 210)
+        header.resizeSection(2, 300)
+        header.resizeSection(3, 95)
+        header.setStretchLastSection(True)
         self.table.cellDoubleClicked.connect(self.show_detail)
         layout.addWidget(self.table)
         self.setCentralWidget(container)
@@ -1957,8 +1964,24 @@ class MainWindow(QMainWindow):
 
     def render_inventory(self) -> None:
         rows = combine(self.items, self.snap_records, self.rpm_records)
+        # Large RPM inventories can contain thousands of rows. Avoid repainting
+        # the widget for every inserted cell while keeping the UI responsive.
+        self.table.setUpdatesEnabled(False)
         self.table.setSortingEnabled(False)
         self.table.setRowCount(len(rows))
+        # Reuse three tiny source markers rather than creating and painting
+        # a new QPixmap for every RPM package.
+        from PySide6.QtGui import QPainter
+        icons = {}
+        for provider, color in (("Flatpak", "#278b89"), ("RPM", "#8b78bd"), ("Snap", "#bf7837")):
+            marker = QPixmap(9, 16)
+            marker.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(marker)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(color))
+            painter.drawRoundedRect(1, 1, 7, 14, 2, 2)
+            painter.end()
+            icons[provider] = QIcon(marker)
         for row, record in enumerate(rows):
             values = [record.kind, record.identifier, record.reference, record.scope,
                       record.installed, record.user_data, record.app_total,
@@ -1982,20 +2005,12 @@ class MainWindow(QMainWindow):
             # Only the marker is colored. Text and row selection remain
             # controlled by the active Qt/KDE palette (including dark mode).
             source.setText(record.provider)
-            marker = QPixmap(9, 16)
-            marker.fill(Qt.GlobalColor.transparent)
-            from PySide6.QtGui import QPainter
-            painter = QPainter(marker)
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor("#278b89" if record.provider == "Flatpak"
-                                    else "#8b78bd" if record.provider == "RPM" else "#bf7837"))
-            painter.drawRoundedRect(1, 1, 7, 14, 2, 2)
-            painter.end()
-            source.setIcon(QIcon(marker))
+            source.setIcon(icons[record.provider])
             source.setToolTip(record.provider + " package manager")
         self.table.setSortingEnabled(True)
         self.table.sortItems(6, Qt.SortOrder.DescendingOrder)
         self.apply_filters()
+        self.table.setUpdatesEnabled(True)
         message = (f"{len(self.items)} Flatpak records; {len(self.snap_records)} "
                    "Snap revisions. Shared components excluded from application "
                    "totals; unknown measurements are not zero. Read-only.")

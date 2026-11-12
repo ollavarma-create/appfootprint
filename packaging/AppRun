@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+HERE="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+# Nuitka's PySide6 plugin bundles Qt platform plugins beside its Qt modules.
+# Qt otherwise searches the host system, which may be a different Qt version.
+export QT_QPA_PLATFORM_PLUGIN_PATH="$HERE/usr/bin/PySide6/qt-plugins/platforms"
+export QT_PLUGIN_PATH="$HERE/usr/bin/PySide6/qt-plugins"
+exec "$HERE/usr/bin/AppFootprint" "$@"
