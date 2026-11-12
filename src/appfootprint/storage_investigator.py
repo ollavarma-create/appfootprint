@@ -1,4 +1,4 @@
-"""Read-only one-level storage investigation for trusted XDG roots."""
+"""Read-only navigable storage investigation for trusted XDG roots."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -27,6 +27,69 @@ def allowed_root(path: Path, home: Path | None = None) -> bool:
     return os.path.abspath(path) in candidates
 
 
+def allowed_directory(path: Path, home: Path | None = None) -> bool:
+    """Validate every path component; never follow a symlink or escape XDG roots."""
+    home = Path.home() if home is None else Path(home)
+    path = Path(os.path.abspath(path))
+    roots = [Path(os.path.abspath(home / relative)) for _, relative in TARGETS]
+    for root in roots:
+        try:
+            relative = path.relative_to(root)
+        except ValueError:
+            continue
+        # Validate the root itself and each child component. Symlinked parents
+        # cannot redirect traversal outside the lexical XDG scope.
+        for component in (root, *(root.joinpath(*relative.parts[:i])
+                                  for i in range(1, len(relative.parts) + 1))):
+            try:
+                if not stat.S_ISDIR(component.lstat().st_mode):
+                    return False
+            except OSError:
+                return False
+        return True
+    return False
+
+
+@dataclass
+class NavigationHistory:
+    """Browser-like path history, independent of Qt and the filesystem."""
+    paths: list[Path]
+    index: int = 0
+
+    @classmethod
+    def at(cls, root: Path) -> "NavigationHistory":
+        return cls([Path(root)])
+
+    @property
+    def current(self) -> Path:
+        return self.paths[self.index]
+
+    @property
+    def can_back(self) -> bool:
+        return self.index > 0
+
+    @property
+    def can_forward(self) -> bool:
+        return self.index + 1 < len(self.paths)
+
+    def visit(self, path: Path) -> None:
+        path = Path(path)
+        if path == self.current:
+            return
+        self.paths = self.paths[:self.index + 1] + [path]
+        self.index += 1
+
+    def back(self) -> Path:
+        if self.can_back:
+            self.index -= 1
+        return self.current
+
+    def forward(self) -> Path:
+        if self.can_forward:
+            self.index += 1
+        return self.current
+
+
 def investigate(
     root: Path,
     *,
@@ -35,8 +98,8 @@ def investigate(
     progress: Callable[[str], None] | None = None,
 ) -> Investigation:
     root = Path(root)
-    if not allowed_root(root, home):
-        raise ValueError("Select one of the configured XDG inventory roots")
+    if not allowed_directory(root, home):
+        raise ValueError("Select a real directory inside a configured XDG root")
     info = root.lstat()
     if not stat.S_ISDIR(info.st_mode):
         raise ValueError("Root is not a real directory")
