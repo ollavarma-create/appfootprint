@@ -910,6 +910,8 @@ class MainWindow(QMainWindow):
         self.snap_card = self._create_provider_card(
             "Snap", self.snap_overview, self.snap_button, self.snap_scan_status
         )
+        self.button.hide()  # Preserve explicit visibility until availability probe completes.
+        self.snap_button.hide()
         self.flatpak_card.hide()
         self.snap_card.hide()
         self._layout_overview_cards()
@@ -1026,6 +1028,8 @@ class MainWindow(QMainWindow):
         self._flatpak_available = bool(flatpak and flatpak.available)
         self._snap_available = bool(snap and snap.available)
         self._layout_overview_cards()
+        self.button.setVisible(self._flatpak_available)
+        self.snap_button.setVisible(self._snap_available)
         messages = []
         for name, status in (("Flatpak", flatpak), ("Snap", snap)):
             if status and status.available:
