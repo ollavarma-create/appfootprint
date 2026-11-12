@@ -11,7 +11,7 @@ from collections.abc import Callable
 from PySide6.QtCore import QObject, QRunnable, QThread, QThreadPool, Signal, Qt, QUrl
 from PySide6.QtGui import QDesktopServices, QColor, QPixmap, QIcon
 from PySide6.QtWidgets import (
-    QApplication, QDialog, QDialogButtonBox, QHeaderView, QLabel, QMenu, QFrame, QGroupBox,
+    QApplication, QDialog, QDialogButtonBox, QHeaderView, QLabel, QMenu, QFrame, QGroupBox, QGridLayout, QSizePolicy,
     QMainWindow, QProgressBar, QPushButton, QScrollArea, QStackedWidget, QHBoxLayout, QComboBox, QTableWidget, QTableWidgetItem,
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
@@ -801,7 +801,7 @@ class FootprintOverview(QWidget):
         self.provider = provider
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 4, 6, 4)
-        self.heading = QLabel(f"{provider}: Not scanned")
+        self.heading = QLabel("Not scanned")
         layout.addWidget(self.heading)
         self.bar = QFrame()
         self.bar.setFixedHeight(14)
@@ -825,18 +825,18 @@ class FootprintOverview(QWidget):
 
     def update_overview(self, overview) -> None:
         if not overview.scanned:
-            self.heading.setText(f"{self.provider}: Not scanned")
+            self.heading.setText("Not scanned")
             self.bar.hide()
             self.legend.setText("Run a scan to see measured storage.")
             self.coverage.setText("")
             return
         self.heading.setText(
-            f"{self.provider}: {format_size(overview.measured_bytes)} "
+            f"{format_size(overview.measured_bytes)} "
             "in reported measurements (not reclaimable space)"
         )
         self.legend.setText(
-            f"Applications: {format_size(overview.application_bytes)} · "
-            f"Shared components: {format_size(overview.shared_bytes)}"
+            f"Apps: {format_size(overview.application_bytes)} · "
+            f"Shared: {format_size(overview.shared_bytes)}"
         )
         a, b = overview.application_bytes, overview.shared_bytes
         self.bar.setVisible(a + b > 0)
@@ -847,13 +847,16 @@ class FootprintOverview(QWidget):
         self.application_segment.setVisible(a > 0)
         self.shared_segment.setVisible(b > 0)
         self.coverage.setText(
-            f"Known targets: {overview.measured_targets} measured, "
-            f"{overview.absent_targets} absent, "
-            f"{overview.unknown_targets} unknown. "
-            + ("Partial measurement — unknown sizes are not represented in the bar. "
-               if overview.partial else
-               "All identified targets accounted for; other storage may exist. ")
-            + "Target counts are not a percentage of disk space."
+            f"{overview.measured_targets} measured · "
+            f"{overview.absent_targets} absent · "
+            f"{overview.unknown_targets} unknown"
+            + (" · Partial measurement" if overview.partial else "")
+        )
+        self.coverage.setToolTip(
+            "Counts describe identified measurement targets, not a percentage "
+            "of disk bytes. Unknown locations may contain arbitrarily large "
+            "amounts of data. The bar excludes unknown sizes and does not "
+            "estimate reclaimable storage."
         )
 
 
@@ -882,27 +885,40 @@ class MainWindow(QMainWindow):
         self.provider_status = QLabel("Checking available package providers…")
         self.provider_status.setWordWrap(True)
         layout.addWidget(self.provider_status)
-        self.overview_group = QGroupBox("Storage overview — measured bytes only")
-        overview_layout = QVBoxLayout(self.overview_group)
-        self.flatpak_overview = FootprintOverview("Flatpak")
-        self.snap_overview = FootprintOverview("Snap")
-        overview_layout.addWidget(self.flatpak_overview)
-        overview_layout.addWidget(self.snap_overview)
-        layout.addWidget(self.overview_group)
+        self.overview_group = QGroupBox("Storage overview — reported bytes, not reclaimable space")
+        self.overview_grid = QGridLayout(self.overview_group)
+        self.overview_grid.setContentsMargins(8, 8, 8, 8)
+        self.overview_grid.setSpacing(8)
+        self._overview_columns = 0
+
         self.button = QPushButton("Scan Flatpak installations")
         self.button.clicked.connect(self.start_scan)
-        self.button.hide()  # Only reveal after the provider probe succeeds.
-        layout.addWidget(self.button)
         self.flatpak_scan_status = QLabel("Flatpak: Not scanned")
         self.flatpak_scan_status.setWordWrap(True)
-        layout.addWidget(self.flatpak_scan_status)
+        self.flatpak_overview = FootprintOverview("Flatpak")
+        self.flatpak_card = self._create_provider_card(
+            "Flatpak", self.flatpak_overview, self.button, self.flatpak_scan_status
+        )
+
         self.snap_button = QPushButton("Scan Snap installations")
         self.snap_button.clicked.connect(self.start_snap_scan)
-        self.snap_button.hide()
-        layout.addWidget(self.snap_button)
         self.snap_scan_status = QLabel("Snap: Not scanned")
         self.snap_scan_status.setWordWrap(True)
-        layout.addWidget(self.snap_scan_status)
+        self.snap_overview = FootprintOverview("Snap")
+        self.snap_card = self._create_provider_card(
+            "Snap", self.snap_overview, self.snap_button, self.snap_scan_status
+        )
+        self.flatpak_card.hide()
+        self.snap_card.hide()
+        self._layout_overview_cards()
+        layout.addWidget(self.overview_group)
+        self.overview_note = QLabel(
+            "Teal: applications · Violet: shared components. "
+            "Bars show measured bytes within each provider only; "
+            "unknown sizes are excluded. Target counts are not disk percentages."
+        )
+        self.overview_note.setWordWrap(True)
+        layout.addWidget(self.overview_note)
         filters = QHBoxLayout()
         filters.addWidget(QLabel("Source:"))
         self.source_filter = QComboBox()
@@ -952,6 +968,44 @@ class MainWindow(QMainWindow):
         self.probe.detected.connect(self.providers_detected)
         self.probe.start()
 
+    @staticmethod
+    def _create_provider_card(provider, overview, button, status):
+        card = QGroupBox(provider)
+        card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        body = QVBoxLayout(card)
+        body.setContentsMargins(8, 6, 8, 6)
+        body.setSpacing(4)
+        body.addWidget(overview)
+        body.addWidget(button)
+        body.addWidget(status)
+        return card
+
+    def _layout_overview_cards(self) -> None:
+        cards = [card for card, available in (
+            (self.flatpak_card, self._flatpak_available),
+            (self.snap_card, self._snap_available),
+        ) if available]
+        # One column when narrow; otherwise put provider cards side by side.
+        # A future RPM card can join this list without changing the layout model.
+        columns = 1 if self.width() < 820 else min(3, max(1, len(cards)))
+        if columns == self._overview_columns and all(
+            self.overview_grid.indexOf(card) >= 0 for card in cards
+        ):
+            return
+        self._overview_columns = columns
+        for card in (self.flatpak_card, self.snap_card):
+            self.overview_grid.removeWidget(card)
+            card.hide()
+        for index, card in enumerate(cards):
+            self.overview_grid.addWidget(card, index // columns, index % columns)
+            card.show()
+        self.overview_group.setVisible(bool(cards))
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "overview_grid") and hasattr(self, "_flatpak_available"):
+            self._layout_overview_cards()
+
     def closeEvent(self, event):
         # Keep worker-owned Qt objects alive until scans stop.
         running = [worker for worker in (self.worker, self.snap_worker)
@@ -969,8 +1023,7 @@ class MainWindow(QMainWindow):
         snap = statuses.get("snap")
         self._flatpak_available = bool(flatpak and flatpak.available)
         self._snap_available = bool(snap and snap.available)
-        self.button.setVisible(self._flatpak_available)
-        self.snap_button.setVisible(self._snap_available)
+        self._layout_overview_cards()
         messages = []
         for name, status in (("Flatpak", flatpak), ("Snap", snap)):
             if status and status.available:
