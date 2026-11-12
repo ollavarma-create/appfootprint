@@ -253,3 +253,83 @@ def test_scan_progress_is_local_to_provider_status(monkeypatch):
     window.worker = None
     window.snap_worker = None
     window.close()
+
+
+def test_overview_updates_per_provider_without_conflating_snap_storage(monkeypatch):
+    from appfootprint.scanner import Item
+    from appfootprint.inventory import StorageMeasurement, StorageRole, MeasurementStatus
+    from appfootprint.providers.snap_storage import SnapStorage
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(gui.ProviderProbeThread, "start", lambda self: None)
+    window = gui.MainWindow()
+    assert "Not scanned" in window.flatpak_overview.heading.text()
+    assert "Not scanned" in window.snap_overview.heading.text()
+    window.show_results([
+        Item("org.example.App", "app/example", "system", "app",
+             allocated_bytes=4096, user_data_bytes=None)
+    ], [])
+    assert "Partial measurement" in window.flatpak_overview.coverage.text()
+    assert "Not scanned" in window.snap_overview.heading.text()
+    storage = SnapStorage(
+        StorageMeasurement(StorageRole.SHARED, MeasurementStatus.INACCESSIBLE),
+        StorageMeasurement(StorageRole.SHARED, MeasurementStatus.INACCESSIBLE),
+    )
+    window.show_snap_results([], [], storage)
+    assert "2 unknown" in window.snap_overview.coverage.text()
+    assert "0.0 B" in window.snap_overview.heading.text()
+    window.close()
+
+
+def test_provider_cards_adapt_and_hide_unavailable(monkeypatch):
+    from appfootprint.provider_detection import ProviderStatus
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(gui.ProviderProbeThread, "start", lambda self: None)
+    window = gui.MainWindow()
+    statuses = {
+        "flatpak": ProviderStatus("flatpak", True, "ok", "1.18"),
+        "snap": ProviderStatus("snap", True, "ok", "2.78"),
+    }
+    window.show()
+    window.providers_detected(statuses)
+    QApplication.processEvents()
+    assert window.overview_grid.indexOf(window.flatpak_card) >= 0
+    assert window.overview_grid.indexOf(window.snap_card) >= 0
+    assert window.button.parentWidget() is window.flatpak_card
+    assert window.snap_button.parentWidget() is window.snap_card
+    window.resize(1100, 700)
+    QApplication.processEvents()
+    assert window.overview_grid.itemAtPosition(0, 0).widget() is window.flatpak_card
+    assert window.overview_grid.itemAtPosition(0, 1).widget() is window.snap_card
+    window.resize(700, 700)
+    QApplication.processEvents()
+    assert window.overview_grid.itemAtPosition(1, 0).widget() is window.snap_card
+    statuses["snap"] = ProviderStatus("snap", False, "missing", None)
+    window.providers_detected(statuses)
+    assert window.overview_grid.indexOf(window.snap_card) == -1
+    assert window.overview_grid.indexOf(window.flatpak_card) >= 0
+    window.close()
+
+
+def test_compact_provider_headers_and_information(monkeypatch):
+    from appfootprint.provider_detection import ProviderStatus
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(gui.ProviderProbeThread, "start", lambda self: None)
+    window = gui.MainWindow()
+    window.show()
+    window.providers_detected({
+        "flatpak": ProviderStatus("flatpak", True, "ok", "Flatpak 1.18.4"),
+        "snap": ProviderStatus("snap", True, "ok", "snap 2.78"),
+    })
+    assert "1.18.4" in window.flatpak_card.title()
+    assert "2.78" in window.snap_card.title()
+    assert window.info.isHidden()
+    assert window.provider_status.isHidden()
+    assert window.storage_summary.isHidden()
+    assert window.flatpak_info_button.isVisible()
+    assert window.snap_info_button.isVisible()
+    window.show_results([], [])
+    window.show_snap_results([], [], None)
+    assert "0 records" in window.flatpak_scan_status.text()
+    assert "Unknown measurements are not zero" in window._provider_information("Flatpak")
+    assert "cache and snapshots" in window._provider_information("Snap")
+    window.close()

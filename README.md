@@ -157,3 +157,45 @@ preserves the last completed results. Snap may additionally display
 **Partial coverage** when protected cache or snapshot directories cannot
 be measured; a completed scan never implies full filesystem coverage.
 No elevated privileges are requested.
+
+### Storage overview and measurement coverage (PR #17)
+
+A small **Storage overview** above the detailed table shows separate Flatpak
+and Snap bars. Teal represents reported bytes in applications (including
+measured user data); violet represents reported bytes in shared components.
+The bars show the **relative proportions of reported bytes within each
+provider**, not physical disk occupancy or space freed by uninstalling.
+There is deliberately no cross-provider grand total.
+
+Below each bar, the number of identified measurement targets is reported as
+measured, absent or unknown. These are **target counts**, not a percentage of
+disk space: one unknown directory could be much larger than every measured
+target. Snap cache and snapshot targets contribute to coverage but their
+bytes do **not** enter the application/shared-component bar. Unidentified
+storage cannot be included in coverage. Measurements are not deduplicated
+across Btrfs extents, snapshots, or separate package providers.
+
+The existing detailed inventory remains available below the overview, with
+source identity and measurement paths preserved for future drill-down.
+
+### Responsive provider cards (PR #17 refinement)
+
+Available package providers appear as independent cards in the storage
+overview. On wide windows the cards are side by side; on narrow windows
+they stack vertically. Providers that are not available are hidden, and
+RPM will get a card only when its scanner is implemented. Each card owns
+its Scan/Rescan action, progress and timestamp, measured-byte bar, and
+short target-count coverage indicator. The shared legend explains the
+bar colors and the limitations of the target counts. The detailed table
+and its source/type filters remain below the cards. All colors used for
+measurements have textual labels and are independent of package-source
+colors.
+
+### Compact provider information (PR #17 refinement)
+
+The provider version appears in the Flatpak or Snap card title. A keyboard-
+accessible **ⓘ** button on each card opens a dialog with scan details, the
+read-only policy, measurement caveats, and (for Snap) cache/snapshot access
+limitations. The same button has a hover tooltip. This replaces the three
+long explanatory lines above the overview; scan progress and issue state
+remain visible in the cards. The shared bar legend stays visible.
