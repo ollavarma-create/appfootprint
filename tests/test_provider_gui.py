@@ -227,3 +227,29 @@ def test_provider_scan_with_issues_and_failed_state(monkeypatch):
     window.show_results([], ["Scan failed: unavailable"])
     assert "Scan failed" in window.flatpak_scan_status.text()
     window.close()
+
+
+def test_scan_progress_is_local_to_provider_status(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(gui.ProviderProbeThread, "start", lambda self: None)
+    window = gui.MainWindow()
+    window._scan_state["Flatpak"] = "scanning"
+    window._scan_state["Snap"] = "not_scanned"
+    class Worker:
+        class Cancel:
+            def is_set(self):
+                return False
+        _cancel = Cancel()
+    window.worker = Worker()
+    window.show_progress("Scanning org.example.App (3/18)…")
+    assert "org.example.App (3/18)" in window.flatpak_scan_status.text()
+    assert "Not scanned" in window.snap_scan_status.text()
+    assert "org.example.App" not in window.info.text()
+    window.snap_worker = Worker()
+    window._scan_state["Snap"] = "scanning"
+    window.show_snap_progress("Scanning snap revision (2/6)…")
+    assert "revision (2/6)" in window.snap_scan_status.text()
+    assert "revision (2/6)" not in window.info.text()
+    window.worker = None
+    window.snap_worker = None
+    window.close()
