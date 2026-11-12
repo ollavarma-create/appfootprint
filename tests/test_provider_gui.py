@@ -128,4 +128,6 @@ def test_snap_dialog_protected_storage_and_shared_data():
     assert summary.count("Requires administrator access") == 2
     assert "does not request administrator privileges" in summary
     assert "Permission denied" not in summary
+    assert "Partial inventory" in dialog.coverage.text()
+    assert "No complete storage total" in dialog.coverage.text()
     dialog.close()
