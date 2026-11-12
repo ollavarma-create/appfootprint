@@ -162,3 +162,31 @@ def test_unified_inventory_source_and_kind_filters(monkeypatch):
     window.source_filter.setCurrentText("All")
     assert sum(not window.table.isRowHidden(i) for i in range(2)) == 1
     window.close()
+
+
+def test_unified_size_columns_sort_with_unknown_and_not_applicable(monkeypatch):
+    from appfootprint.scanner import Item
+    from appfootprint.inventory import (
+        InventoryRecord, PackageKind, StorageMeasurement, MeasurementStatus, StorageRole,
+    )
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(gui.ProviderProbeThread, "start", lambda self: None)
+    window = gui.MainWindow()
+    window.show_results([
+        Item(app_id="org.example.App", ref="app/example", installation="user",
+             kind="app", allocated_bytes=4096, user_data_bytes=0),
+    ], [])
+    shared = InventoryRecord(
+        "snap", "core24", "core24/2307", "system", PackageKind.RUNTIME,
+        measurements=(StorageMeasurement(StorageRole.SHARED, MeasurementStatus.MEASURED,
+                                         8192, path="/var/lib/snapd/snaps/core24_2307.snap"),),
+    )
+    window.show_snap_results([shared], [], None)
+    for column in (4, 5, 6):
+        for order in (gui.Qt.SortOrder.AscendingOrder, gui.Qt.SortOrder.DescendingOrder):
+            window.table.sortItems(column, order)
+        assert all(isinstance(window.table.item(row, column), gui.SizeCell)
+                   for row in range(window.table.rowCount()))
+    assert any(window.table.item(row, 5).text() == "Not applicable"
+               for row in range(window.table.rowCount()))
+    window.close()
