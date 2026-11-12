@@ -163,6 +163,7 @@ class RpmDependencyDialog(QDialog):
         self.setWindowTitle("RPM capability explorer — candidate matches")
         self.resize(940, 620)
         self.reference = reference
+        self.measurements_by_reference = {}
         self.index = None
         self.history = [reference]
         self.position = 0
@@ -223,6 +224,31 @@ class RpmDependencyDialog(QDialog):
             return
         self.index = index
         self.show_package(self.reference)
+
+    def show_measurement(self):
+        record = self.measurements_by_reference.get(self.reference)
+        if record is None:
+            QMessageBox.information(
+                self, "RPM measurement",
+                "Measurement unavailable for this package. Scan RPM inventory "
+                "to collect allocated-byte measurements.")
+            return
+        measurement = record.measurements[0] if record.measurements else None
+        status = measurement.status.value if measurement else "unknown"
+        details = [
+            record.reference,
+            f"Measurement: {status}",
+            f"Allocated: {format_size(measurement.allocated_bytes if measurement else None)}",
+            f"Known subtotal (not complete size): {format_size(int(record.metadata.get('known_allocated_bytes', '0')))}",
+            f"File count: {record.metadata.get('file_count', '?')}",
+            f"Internal hardlinks: {record.metadata.get('internal_hardlink_paths', '?')}",
+            f"Multi-owned paths: {record.metadata.get('multi_owned_paths', '?')}",
+            f"Missing files: {record.metadata.get('absent_files', '?')}",
+            f"Inaccessible files: {record.metadata.get('inaccessible_files', '?')}",
+            *record.issues,
+            "Read-only. No DNF dependency resolution or reclaimable-space estimate.",
+        ]
+        QMessageBox.information(self, "RPM measurement", "\n".join(details))
 
     def show_package(self, reference):
         if self.index is None:
@@ -1616,26 +1642,12 @@ class MainWindow(QMainWindow):
             return
         if provider == "RPM":
             record = self.rpm_records[original_index]
-            measurement = record.measurements[0] if record.measurements else None
-            status = measurement.status.value if measurement else "unknown"
-            details = [
-                record.reference,
-                f"Measurement: {status}",
-                f"Allocated: {format_size(measurement.allocated_bytes if measurement else None)}",
-                f"Known subtotal (not complete size): {format_size(int(record.metadata.get('known_allocated_bytes', '0')))}",
-                f"File count: {record.metadata.get('file_count', '?')}",
-                f"Internal hardlinks: {record.metadata.get('internal_hardlink_paths', '?')}",
-                f"Multi-owned paths: {record.metadata.get('multi_owned_paths', '?')}",
-                f"Missing files: {record.metadata.get('absent_files', '?')}",
-                f"Inaccessible files: {record.metadata.get('inaccessible_files', '?')}",
-                *record.issues,
-                "Read-only. No DNF dependency resolution or reclaimable-space estimate.",
-            ]
             dialog = RpmDependencyDialog(record.reference, self)
+            dialog.measurements_by_reference = {
+                item.reference: item for item in self.rpm_records
+            }
             detail_button = QPushButton("Show selected package measurement")
-            detail_button.clicked.connect(
-                lambda: QMessageBox.information(
-                    dialog, "RPM measurement", "\\n".join(details)))
+            detail_button.clicked.connect(dialog.show_measurement)
             dialog.layout().insertWidget(2, detail_button)
             dialog.exec()
             return
