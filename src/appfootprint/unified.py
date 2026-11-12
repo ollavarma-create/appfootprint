@@ -21,7 +21,8 @@ class UnifiedRow:
     path: str
 
 
-def combine(flatpaks: list[Item], snaps: list[InventoryRecord]) -> list[UnifiedRow]:
+def combine(flatpaks: list[Item], snaps: list[InventoryRecord],
+            rpms: list[InventoryRecord] = ()) -> list[UnifiedRow]:
     rows = []
     for index, item in enumerate(flatpaks):
         total = None
@@ -45,4 +46,16 @@ def combine(flatpaks: list[Item], snaps: list[InventoryRecord]) -> list[UnifiedR
         rows.append(UnifiedRow(
             "Snap", index, record.kind.value, record.identifier, record.reference,
             record.scope, image_bytes, user_bytes, total, "—", image.path if image else ""))
+    for index, record in enumerate(rpms):
+        measurement = next((m for m in record.measurements
+                            if m.role == StorageRole.DIRECT), None)
+        complete = (measurement is not None and
+                    measurement.status == MeasurementStatus.MEASURED)
+        installed = measurement.allocated_bytes if complete else None
+        # RPM's known subtotal is diagnostic only, never a complete size.
+        detail = ("Complete package measurement" if complete else
+                  "; ".join(record.issues) or "Unknown package measurement")
+        rows.append(UnifiedRow(
+            "RPM", index, "rpm", record.identifier, record.reference,
+            record.scope, installed, None, None, "—", detail))
     return rows

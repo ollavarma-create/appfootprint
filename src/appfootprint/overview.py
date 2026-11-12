@@ -85,3 +85,25 @@ def snap_overview(records: list[InventoryRecord], storage: SnapStorage | None,
             for m in (storage.cache, storage.snapshots):
                 account(m.status, m.allocated_bytes, "other")
     return ProviderOverview("Snap", apps, shared, measured, unknown, absent, scanned)
+
+
+def rpm_overview(records: list[InventoryRecord], *, scanned: bool) -> ProviderOverview:
+    """Count only complete RPM package measurements; unknown bytes stay unknown.
+
+    RPM package kinds are unclassified. The shared slot represents the
+    unclassified installed-package bucket, NOT known shared dependencies.
+    """
+    measured = unknown = absent = allocated = 0
+    for record in records:
+        measurement = next((m for m in record.measurements
+                            if m.role == StorageRole.DIRECT), None)
+        if measurement is None:
+            unknown += 1
+        elif measurement.status == MeasurementStatus.MEASURED and measurement.allocated_bytes is not None:
+            measured += 1
+            allocated += measurement.allocated_bytes
+        elif measurement.status == MeasurementStatus.ABSENT:
+            absent += 1
+        else:
+            unknown += 1
+    return ProviderOverview("RPM", 0, allocated, measured, unknown, absent, scanned)

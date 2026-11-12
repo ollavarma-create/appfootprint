@@ -312,3 +312,25 @@ for field in fields:
     print(field, counts[field])
 PY
 ```
+
+### RPM GUI integration (PR #19)
+
+When RPM and its installed-package database are available, AppFootprint shows
+a third provider card and a **Scan RPM installations** action. The RPM scan
+runs on a cancellable worker thread. RPM records appear in the combined table,
+with source filter **RPM** and kind filter **RPM packages**; double-click a row
+for per-package measurement diagnostics.
+
+RPM package kinds are deliberately **unclassified**, not applications or
+shared dependencies. The RPM overview includes only complete per-package
+allocated-byte measurements. Unknown package sizes are not zero and partial
+known-byte subtotals are not promoted to complete measurements. The purple
+RPM bar is an *unclassified package measurement* bucket, not a dependency
+or reclaimable-space estimate. RPM user data, RPM dependency exploration,
+and package removal are not implemented. Scans remain read-only and never
+request root privileges.
+
+Validation: `pytest -q` and launch the GUI on Fedora. Scan RPM, verify
+the overview counts and the **RPM** table filter, sort by **Installed**,
+double-click complete and incomplete RPM rows, cancel a rescan, and verify
+that Flatpak/Snap scanning and filtering still work.
