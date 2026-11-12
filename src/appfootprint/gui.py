@@ -1632,9 +1632,13 @@ class MainWindow(QMainWindow):
                 *record.issues,
                 "Read-only. No RPM dependency analysis or reclaimable-space estimate.",
             ]
-            # Open the navigable explorer; measurement details remain
-            # accessible in the tooltip on the originating table row.
-            RpmDependencyDialog(record.reference, self).exec()
+            dialog = RpmDependencyDialog(record.reference, self)
+            detail_button = QPushButton("Show selected package measurement")
+            detail_button.clicked.connect(
+                lambda: QMessageBox.information(
+                    dialog, "RPM measurement", "\\n".join(details)))
+            dialog.layout().insertWidget(2, detail_button)
+            dialog.exec()
             return
         item = self.items[original_index]
         if item.kind not in ("runtime", "app"):
