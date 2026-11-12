@@ -462,3 +462,22 @@ Future CI workflows should test on pull requests, create downloadable
 build artifacts on demand, and publish GitHub Releases only for explicitly
 approved version tags. Package-manager CLI tools remain host dependencies;
 they should not be bundled as substitute system package databases.
+
+### Deep Storage Investigator navigation (PR #25)
+
+Double-click a real subdirectory to investigate deeper inside one of the five
+XDG roots. **Back** and **Forward** navigate the visited-path history; visiting
+a new path after Back discards the forward branch. **Copy path** copies the
+selected item's absolute path to the clipboard without executing anything.
+
+Navigation checks every directory component with `lstat` and refuses
+symlinked directories or paths outside the configured XDG roots. Files cannot
+be opened or executed by double-click. Each navigation triggers a new
+read-only scan. Navigation is ignored while a scan is running; cancellation
+keeps the last completed table.
+
+Fedora/KDE acceptance: `pytest -q`; investigate
+`~/.var/app/org.prismlauncher.PrismLauncher` or another large tree; use
+Back/Forward and verify the displayed path, double-click a regular file
+(no navigation), copy a selected path, test a symlink, cancel/rescan and
+verify no provider totals change.

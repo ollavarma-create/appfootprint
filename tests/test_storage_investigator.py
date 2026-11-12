@@ -7,7 +7,8 @@ import pytest
 
 from appfootprint.scanner import ScanCancelled
 from appfootprint.storage_investigator import (
-    allowed_root, investigate, inspection_commands, inspection_script,
+    allowed_root, allowed_directory, NavigationHistory,
+    investigate, inspection_commands, inspection_script,
 )
 
 
@@ -66,3 +67,66 @@ def test_inspection_script_has_real_newline_between_commands():
     assert script.count("\n") == 1
     assert "\\n" not in script
     assert script.splitlines() == list(inspection_commands("/home/example/.cache/mozilla"))
+
+
+def test_nested_directory_navigation_and_symlink_barrier(tmp_path):
+    cache = tmp_path / ".cache"
+    nested = cache / "a" / "b"
+    nested.mkdir(parents=True)
+    (nested / "payload").write_bytes(b"x" * 4096)
+    assert allowed_directory(nested, tmp_path)
+    result = investigate(cache / "a", home=tmp_path)
+    assert result.children[0].label == "b"
+    assert investigate(nested, home=tmp_path).children[0].label == "payload"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (cache / "link").symlink_to(outside, target_is_directory=True)
+    assert not allowed_directory(cache / "link", tmp_path)
+    assert not allowed_directory(cache / "link" / "sub", tmp_path)
+    with pytest.raises(ValueError):
+        investigate(cache / "link", home=tmp_path)
+    assert not allowed_directory(tmp_path / "outside", tmp_path)
+
+
+def test_history_back_forward_and_branching(tmp_path):
+    root = tmp_path / ".cache"
+    history = NavigationHistory.at(root)
+    assert history.current == root
+    assert not history.can_back
+    history.visit(root / "a")
+    history.visit(root / "a" / "b")
+    assert history.back() == root / "a"
+    assert history.back() == root
+    assert history.forward() == root / "a"
+    history.visit(root / "other")
+    assert not history.can_forward
+    assert history.paths == [root, root / "a", root / "other"]
+
+
+def test_investigator_clears_stale_commands_on_navigation(tmp_path, monkeypatch):
+    """Navigation must not display commands from the previously selected path."""
+    from PySide6.QtWidgets import QApplication, QTableWidgetItem
+    from appfootprint.gui import StorageInvestigatorDialog
+    import appfootprint.gui as gui
+
+    app = QApplication.instance() or QApplication([])
+    root = tmp_path / ".cache"
+    child = root / "child"
+    child.mkdir(parents=True)
+    # Use the synthetic home for XDG scope validation, not the real user home.
+    monkeypatch.setattr(gui, "allowed_directory",
+                        lambda path: allowed_directory(path, tmp_path))
+    # Keep this GUI regression deterministic: no background scan needed.
+    monkeypatch.setattr(StorageInvestigatorDialog, "start_scan", lambda self: None)
+    dialog = StorageInvestigatorDialog(root)
+    dialog.table.setRowCount(1)
+    dialog.table.setItem(0, 4, QTableWidgetItem(str(child)))
+    dialog.table.setCurrentCell(0, 4)
+    assert str(child) in dialog.commands.text()
+    dialog.navigate_to(child)
+    assert dialog.history.current == child
+    assert dialog.commands.text() == "Select a row to see inspection commands"
+    assert not dialog.copy_button.isEnabled()
+    assert not dialog.copy_path_button.isEnabled()
+    assert dialog.table.rowCount() == 0
+    dialog.close()
