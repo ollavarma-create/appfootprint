@@ -27,7 +27,7 @@ from .rpm_dependencies import scan_rpm_capabilities
 from .display import provider_title, inventory_column_labels
 from .user_storage import scan_user_storage
 from .storage_investigator import (investigate, inspection_commands, inspection_script,
-                                   allowed_directory, NavigationHistory)
+                                   allowed_directory, NavigationHistory as StorageNavigationHistory)
 from .unified import combine
 from .overview import flatpak_overview, snap_overview, rpm_overview
 from .providers.snap_storage import scan_storage
@@ -209,7 +209,7 @@ class StorageInvestigatorDialog(QDialog):
     def __init__(self, root, parent=None):
         super().__init__(parent)
         self.root = Path(root)
-        self.history = NavigationHistory.at(self.root)
+        self.history = StorageNavigationHistory.at(self.root)
         self.pending_path = None
         self.setWindowTitle("Storage Investigator — " + str(root))
         self.resize(980, 580)
