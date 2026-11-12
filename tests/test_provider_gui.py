@@ -308,3 +308,28 @@ def test_provider_cards_adapt_and_hide_unavailable(monkeypatch):
     assert window.overview_grid.indexOf(window.snap_card) == -1
     assert window.overview_grid.indexOf(window.flatpak_card) >= 0
     window.close()
+
+
+def test_compact_provider_headers_and_information(monkeypatch):
+    from appfootprint.provider_detection import ProviderStatus
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(gui.ProviderProbeThread, "start", lambda self: None)
+    window = gui.MainWindow()
+    window.show()
+    window.providers_detected({
+        "flatpak": ProviderStatus("flatpak", True, "ok", "Flatpak 1.18.4"),
+        "snap": ProviderStatus("snap", True, "ok", "snap 2.78"),
+    })
+    assert "1.18.4" in window.flatpak_card.title()
+    assert "2.78" in window.snap_card.title()
+    assert window.info.isHidden()
+    assert window.provider_status.isHidden()
+    assert window.storage_summary.isHidden()
+    assert window.flatpak_info_button.isVisible()
+    assert window.snap_info_button.isVisible()
+    window.show_results([], [])
+    window.show_snap_results([], [], None)
+    assert "0 records" in window.flatpak_scan_status.text()
+    assert "Unknown measurements are not zero" in window._provider_information("Flatpak")
+    assert "cache and snapshots" in window._provider_information("Snap")
+    window.close()
