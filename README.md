@@ -437,7 +437,9 @@ can make measurements non-additive.
 
 Hover over measured sizes in the main inventory, User Storage and Storage
 Investigator to see exact byte counts; unknown values remain unknown and
-partial measurements show a clearly labeled known subtotal.
+partial measurements show a clearly labeled known subtotal. User Storage
+sorts measured allocated bytes numerically, largest first, and its Allocated
+column header can be clicked to change sorting.
 
 ### Pre-release acceptance checklist
 
