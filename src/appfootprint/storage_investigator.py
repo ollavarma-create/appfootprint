@@ -78,3 +78,8 @@ def inspection_commands(path: str) -> tuple[str, str]:
         f"du -h --max-depth=1 -- {quoted}",
         f"find {quoted} -type f -size +500M -print",
     )
+
+
+def inspection_script(path: str) -> str:
+    """Return copyable commands separated by real shell newlines."""
+    return "\n".join(inspection_commands(path))
