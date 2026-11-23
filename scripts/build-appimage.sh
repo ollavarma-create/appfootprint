@@ -8,7 +8,6 @@ mkdir -p build dist
 python -m nuitka --standalone --enable-plugin=pyside6 \
   --include-package=appfootprint \
   --output-dir=build --output-filename=AppFootprint \
-  --assume-yes-for-downloads \
   packaging/entrypoint.py
 
 test -x build/entrypoint.dist/AppFootprint
