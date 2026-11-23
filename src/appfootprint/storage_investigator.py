@@ -1,4 +1,4 @@
-"""Read-only navigable storage investigation for trusted XDG roots."""
+"""Read-only navigable storage investigation for hidden home directories."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -9,7 +9,7 @@ import stat
 from typing import Callable
 
 from .scanner import check_cancel
-from .user_storage import TARGETS, _measure, UserStorageEntry
+from .user_storage import _measure, UserStorageEntry
 
 
 @dataclass(frozen=True)
@@ -19,35 +19,44 @@ class Investigation:
     issues: tuple[str, ...]
 
 
+def _hidden_root(path: Path, home: Path) -> Path | None:
+    """Return a lexical top-level hidden root, without resolving symlinks."""
+    home = Path(os.path.abspath(home))
+    path = Path(os.path.abspath(path))
+    try:
+        relative = path.relative_to(home)
+    except ValueError:
+        return None
+    if not relative.parts or not relative.parts[0].startswith("."):
+        return None
+    if relative.parts[0] in (".", ".."):
+        return None
+    return home / relative.parts[0]
+
+
 def allowed_root(path: Path, home: Path | None = None) -> bool:
     home = Path.home() if home is None else Path(home)
-    # Lexical absolute path check, not resolve(): resolving symlinks could
-    # silently change the intended scope.
-    candidates = {os.path.abspath(home / relative) for _, relative in TARGETS}
-    return os.path.abspath(path) in candidates
+    root = _hidden_root(path, home)
+    return root is not None and Path(os.path.abspath(path)) == root
 
 
 def allowed_directory(path: Path, home: Path | None = None) -> bool:
-    """Validate every path component; never follow a symlink or escape XDG roots."""
+    """Accept only real directories below hidden home roots; reject symlinks."""
     home = Path.home() if home is None else Path(home)
     path = Path(os.path.abspath(path))
-    roots = [Path(os.path.abspath(home / relative)) for _, relative in TARGETS]
-    for root in roots:
+    root = _hidden_root(path, home)
+    if root is None:
+        return False
+    relative = path.relative_to(root)
+    # Check every component, including the hidden root itself.
+    for component in (root, *(root.joinpath(*relative.parts[:i])
+                              for i in range(1, len(relative.parts) + 1))):
         try:
-            relative = path.relative_to(root)
-        except ValueError:
-            continue
-        # Validate the root itself and each child component. Symlinked parents
-        # cannot redirect traversal outside the lexical XDG scope.
-        for component in (root, *(root.joinpath(*relative.parts[:i])
-                                  for i in range(1, len(relative.parts) + 1))):
-            try:
-                if not stat.S_ISDIR(component.lstat().st_mode):
-                    return False
-            except OSError:
+            if not stat.S_ISDIR(component.lstat().st_mode):
                 return False
-        return True
-    return False
+        except OSError:
+            return False
+    return True
 
 
 @dataclass
@@ -102,7 +111,7 @@ def investigate(
     # non-directory targets remain rejected by the scope validation below.
     root.lstat()
     if not allowed_directory(root, home):
-        raise ValueError("Select a real directory inside a configured XDG root")
+        raise ValueError("Select a real directory inside a hidden home-directory root")
     info = root.lstat()
     if not stat.S_ISDIR(info.st_mode):
         raise ValueError("Root is not a real directory")
@@ -142,7 +151,7 @@ def inspection_commands(path: str) -> tuple[str, str]:
     quoted = shlex.quote(path)
     return (
         f"du -h --max-depth=1 -- {quoted}",
-        f"find {quoted} -type f -size +500M -print",
+        f"du -ah -- {quoted} | sort -h | tail -20",
     )
 
 

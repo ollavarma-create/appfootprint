@@ -63,7 +63,7 @@ def probe_snap(timeout: float = 3.0) -> ProviderStatus:
                           " ".join(version[0].split()) if version else "Snap")
 
 
-def probe_rpm(timeout: float = 3.0) -> ProviderStatus:
+def probe_rpm(timeout: float = 10.0) -> ProviderStatus:
     executable = shutil.which("rpm")
     if not executable:
         return ProviderStatus("rpm", False, "RPM executable not found in PATH.")

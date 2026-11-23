@@ -58,7 +58,7 @@ def test_quoted_commands_never_delete():
     path = "/home/example/.cache/a 'quoted' ; rm -rf nope"
     commands = inspection_commands(path)
     assert commands[0] == "du -h --max-depth=1 -- " + shlex.quote(path)
-    assert commands[1] == "find " + shlex.quote(path) + " -type f -size +500M -print"
+    assert commands[1] == "du -ah -- " + shlex.quote(path) + " | sort -h | tail -20"
     assert "rm -rf" not in commands[0].split(" -- ", 1)[0]
 
 
@@ -130,3 +130,28 @@ def test_investigator_clears_stale_commands_on_navigation(tmp_path, monkeypatch)
     assert not dialog.copy_path_button.isEnabled()
     assert dialog.table.rowCount() == 0
     dialog.close()
+
+
+def test_unknown_hidden_root_can_be_investigated(tmp_path):
+    unknown = tmp_path / ".unrecognized"
+    nested = unknown / "build"
+    nested.mkdir(parents=True)
+    (nested / "output").write_bytes(b"data")
+    assert allowed_root(unknown, tmp_path)
+    assert allowed_directory(nested, tmp_path)
+    assert investigate(unknown, home=tmp_path).children[0].label == "build"
+    assert not allowed_directory(tmp_path / "visible", tmp_path)
+
+
+def test_symlinked_hidden_root_is_rejected(tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (tmp_path / ".link").symlink_to(outside, target_is_directory=True)
+    assert not allowed_directory(tmp_path / ".link", tmp_path)
+    assert not allowed_directory(tmp_path / ".link" / "child", tmp_path)
+
+
+def test_inspection_examples_have_no_arbitrary_size_cutoff():
+    commands = inspection_commands("/home/example/.cache/thumbnails")
+    assert "+500M" not in " ".join(commands)
+    assert "sort -h | tail -20" in commands[1]

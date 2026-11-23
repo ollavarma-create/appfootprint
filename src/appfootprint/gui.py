@@ -1,14 +1,17 @@
 """Qt interface for read-only Flatpak storage inventory."""
 from __future__ import annotations
 
+from html import escape
+
 import sys
+import shutil
 from datetime import datetime
 from threading import Event
 
 from pathlib import Path
 from collections.abc import Callable
 
-from PySide6.QtCore import QObject, QRunnable, QThread, QThreadPool, Signal, Qt, QUrl
+from PySide6.QtCore import QObject, QRunnable, QThread, QThreadPool, Signal, Qt, QUrl, QProcess, QTimer
 from PySide6.QtGui import QDesktopServices, QColor, QPixmap, QIcon
 from PySide6.QtWidgets import (
     QApplication, QDialog, QDialogButtonBox, QHeaderView, QLabel, QMenu, QFrame, QGroupBox, QGridLayout, QSizePolicy, QToolButton, QMessageBox,
@@ -26,6 +29,9 @@ from .providers.rpm import RpmProvider
 from .rpm_dependencies import scan_rpm_capabilities
 from .display import provider_title, inventory_column_labels
 from .user_storage import scan_user_storage
+from .storage_explanations import XDG_DOCS, FLATPAK_DOCS
+from .storage_catalog import identify_directory, load_user_catalog, user_catalog_path
+from .storage_hints import identify_storage_hint
 from .storage_investigator import (investigate, inspection_commands, inspection_script,
                                    allowed_directory, NavigationHistory as StorageNavigationHistory)
 from .unified import combine
@@ -88,16 +94,20 @@ class ScanThread(QThread):
 
 
 class ProviderProbeThread(QThread):
-    """Check CLI availability without blocking Qt's event loop."""
+    """Probe providers independently; publish results as soon as each completes."""
     detected = Signal(object)
+    provider_detected = Signal(object)
 
     def run(self) -> None:
-        try:
-            statuses = detect_providers()
-        except Exception as exc:
-            statuses = {"flatpak": ProviderStatus(
-                "flatpak", False, f"Provider detection failed: {exc}"
-            )}
+        from .provider_detection import probe_flatpak, probe_snap, probe_rpm
+        statuses = {}
+        for name, probe in (("flatpak", probe_flatpak), ("snap", probe_snap), ("rpm", probe_rpm)):
+            try:
+                status = probe()
+            except Exception as exc:
+                status = ProviderStatus(name, False, f"Provider detection failed: {exc}")
+            statuses[name] = status
+            self.provider_detected.emit(status)
         self.detected.emit(statuses)
 
 
@@ -246,15 +256,18 @@ class StorageInvestigatorDialog(QDialog):
         self.table.itemSelectionChanged.connect(self.show_commands)
         self.table.cellDoubleClicked.connect(self.open_child)
         layout.addWidget(self.table)
-        layout.addWidget(QLabel("Inspection examples (copy only; no execution):"))
+        self.inspection_heading = QLabel("<b>Inspection examples</b> (copy only; no execution):")
+        layout.addWidget(self.inspection_heading)
         self.commands = QLabel("Select a row to see inspection commands")
         self.commands.setWordWrap(True)
         self.commands.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         layout.addWidget(self.commands)
+        self.hint_label = QLabel("Select a cache directory to see an offline explanation.")
+        self.hint_label.setTextFormat(Qt.TextFormat.RichText)
+        self.hint_label.setWordWrap(True)
+        self.hint_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        layout.addWidget(self.hint_label)
         controls = QHBoxLayout()
-        self.scan_button = QPushButton("Scan subdirectories")
-        self.scan_button.clicked.connect(self.start_scan)
-        controls.addWidget(self.scan_button)
         self.cancel_button = QPushButton("Cancel")
         self.cancel_button.setEnabled(False)
         self.cancel_button.clicked.connect(self.cancel_scan)
@@ -263,6 +276,10 @@ class StorageInvestigatorDialog(QDialog):
         self.copy_button.setEnabled(False)
         self.copy_button.clicked.connect(self.copy_commands)
         controls.addWidget(self.copy_button)
+        self.copy_search_button = QPushButton("Copy search terms")
+        self.copy_search_button.setEnabled(False)
+        self.copy_search_button.clicked.connect(self.copy_search_terms)
+        controls.addWidget(self.copy_search_button)
         self.copy_path_button = QPushButton("Copy path")
         self.copy_path_button.setEnabled(False)
         self.copy_path_button.clicked.connect(self.copy_path)
@@ -278,7 +295,6 @@ class StorageInvestigatorDialog(QDialog):
     def start_scan(self):
         if self.worker is not None and self.worker.isRunning():
             return
-        self.scan_button.setEnabled(False)
         self.cancel_button.setEnabled(True)
         self.status.setText("Scanning…")
         self.worker = InvestigationThread(self.history.current, self)
@@ -290,7 +306,6 @@ class StorageInvestigatorDialog(QDialog):
         self.worker.start()
 
     def finish_scan(self):
-        self.scan_button.setEnabled(True)
         self.cancel_button.setEnabled(False)
 
     def cancel_scan(self):
@@ -306,6 +321,8 @@ class StorageInvestigatorDialog(QDialog):
         self.commands.setText("Select a row to see inspection commands")
         self.copy_button.setEnabled(False)
         self.copy_path_button.setEnabled(False)
+        self.copy_search_button.setEnabled(False)
+        self.hint_label.setText("Select a cache directory to see an offline explanation.")
 
     def show_results(self, result, error):
         if error:
@@ -345,6 +362,26 @@ class StorageInvestigatorDialog(QDialog):
                               "Select a row to see inspection commands")
         self.copy_button.setEnabled(bool(commands))
         self.copy_path_button.setEnabled(bool(commands))
+        row = self.table.currentRow()
+        path_item = self.table.item(row, 4) if row >= 0 else None
+        hint = identify_storage_hint(path_item.text()) if path_item is not None else None
+        if hint:
+            self.hint_label.setText(
+                f"<b>Why is this here?</b> {escape(hint.title)}<br>"
+                f"{escape(hint.explanation)}<br>"
+                f"<b>Important:</b> {escape(hint.caution)}<br>"
+                f"<b>Suggested search:</b> {escape(hint.search_terms)}"
+            )
+        else:
+            self.hint_label.setText("No specific offline explanation for this path.")
+        self.copy_search_button.setEnabled(hint is not None)
+
+    def copy_search_terms(self):
+        row = self.table.currentRow()
+        item = self.table.item(row, 4) if row >= 0 else None
+        hint = identify_storage_hint(item.text()) if item is not None else None
+        if hint:
+            QApplication.clipboard().setText(hint.search_terms)
 
     def copy_commands(self):
         commands = self.selected_commands()
@@ -416,15 +453,16 @@ class StorageInvestigatorDialog(QDialog):
 
 
 class UserStorageDialog(QDialog):
-    """Separate XDG observations; intentionally not added to provider totals."""
+    """Hidden home-directory observations; not added to provider totals."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("User Storage — read-only XDG inventory")
+        self.setWindowTitle("User Storage — hidden home directories")
         self.resize(880, 440)
         layout = QVBoxLayout(self)
         note = QLabel(
-            "Independent allocated-byte observations. Flatpak user data may overlap; "
+             "All top-level hidden home directories are inventoried, including unknown ones. "
+            "Measurements may overlap with provider totals; "
             "do not add these values to provider totals. On Btrfs, reported bytes "
             "are not guaranteed physical or reclaimable space. No deletion.")
         note.setWordWrap(True)
@@ -445,6 +483,15 @@ class UserStorageDialog(QDialog):
         self.table.horizontalHeader().setStretchLastSection(True)
         layout.addWidget(self.table)
         self.table.cellDoubleClicked.connect(self.open_investigator)
+        self.table.itemSelectionChanged.connect(self.show_directory_explanation)
+        self.explanation = QLabel("Select a directory to learn what it may contain and why it matters.")
+        self.explanation.setWordWrap(True)
+        self.explanation.setTextFormat(Qt.TextFormat.RichText)
+        self.explanation.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        layout.addWidget(self.explanation)
+        self.help_button = QPushButton("About XDG and Flatpak…")
+        self.help_button.clicked.connect(self.show_storage_help)
+        layout.addWidget(self.help_button)
         hint = QLabel("Double-click a measured directory to inspect its immediate children.")
         layout.addWidget(hint)
         controls = QHBoxLayout()
@@ -461,6 +508,40 @@ class UserStorageDialog(QDialog):
         controls.addWidget(close)
         layout.addLayout(controls)
         self.worker = None
+        self.directory_catalog = load_user_catalog()
+
+    def show_directory_explanation(self):
+        row = self.table.currentRow()
+        path_item = self.table.item(row, 1) if row >= 0 else None
+        if path_item is None:
+            self.explanation.setText("Select a directory to learn what it may contain and why it matters.")
+            return
+        detail = identify_directory(path_item.text(), self.directory_catalog)
+        self.explanation.setText(
+            f"{escape(detail.title)} — {escape(detail.category)}<br>"
+            f"<b>Purpose:</b> {escape(detail.purpose)}<br>"
+            f"<b>May contain:</b> {escape(detail.contents)}<br>"
+            f"<b>Important:</b> {escape(detail.caution)}"
+        )
+
+    def show_storage_help(self):
+        QMessageBox.information(
+            self, "Where Linux applications store data",
+            "XDG Base Directory Specification defines conventional locations:\n"
+            "~/.config — settings\n"
+            "~/.local/share — persistent application data\n"
+            "~/.local/state — application state\n"
+            "~/.cache — caches\n\n"
+            "Flatpak usually isolates application data in ~/.var/app/<app-id>/, "
+            "with its own config, data and cache. Some applications use older "
+            "locations such as ~/.mozilla, and permissions can allow access "
+            "outside the sandbox.\n\n"
+            "Directory names do not prove ownership or safe deletion. "
+            "AppFootprint never deletes data.\n\n"
+            f"XDG: {XDG_DOCS}\nFlatpak: {FLATPAK_DOCS}\n\n"
+            f"Optional user catalog: {user_catalog_path()}\n"
+            "Only local JSON data is read. Built-in safety descriptions take precedence."
+        )
 
     def open_investigator(self, row, _column):
         status = self.table.item(row, 2)
@@ -474,7 +555,7 @@ class UserStorageDialog(QDialog):
             return
         self.scan_button.setEnabled(False)
         self.cancel_button.setEnabled(True)
-        self.status.setText("Scanning XDG directories…")
+        self.status.setText("Scanning hidden home directories…")
         self.worker = UserStorageThread(self)
         self.worker.progress_changed.connect(self.status.setText)
         self.worker.loaded.connect(self.show_results)
@@ -494,7 +575,9 @@ class UserStorageDialog(QDialog):
         self.cancel_button.setEnabled(False)
 
     def show_results(self, entries, issues):
+        self.directory_catalog = load_user_catalog()
         self.table.setSortingEnabled(False)
+        self.table.clearSelection()
         self.table.setRowCount(len(entries))
         for row, entry in enumerate(entries):
             values = [
@@ -510,6 +593,9 @@ class UserStorageDialog(QDialog):
                 elif column == 4 and entry.status == "incomplete":
                     cell.setToolTip(allocated_tooltip(
                         entry.known_allocated_bytes, incomplete=True))
+                elif column == 0:
+                    detail = identify_directory(entry.path, self.directory_catalog)
+                    cell.setToolTip(f"{detail.purpose}\\n{detail.caution}")
                 elif entry.reason:
                     cell.setToolTip(entry.reason)
                 self.table.setItem(row, column, cell)
@@ -1454,10 +1540,11 @@ class MainWindow(QMainWindow):
         self.storage_summary = QLabel("Snap cache and snapshots: not measured.")
         self.storage_summary.setWordWrap(True)
         self.storage_summary.hide()
-        self.provider_status = QLabel("Checking available package providers…")
-        self.provider_status.setWordWrap(True)
+        self.provider_status = QLabel("Detecting installed package managers…")
+        self.provider_status.setWordWrap(False)
         self.provider_status.hide()
-        self.overview_group = QGroupBox("Storage overview — reported bytes, not reclaimable space")
+        self.overview_group = QGroupBox()
+        self.overview_heading = QLabel("Storage overview — reported bytes, not reclaimable space")
         self.overview_grid = QGridLayout(self.overview_group)
         self.overview_grid.setContentsMargins(8, 8, 8, 8)
         self.overview_grid.setSpacing(8)
@@ -1499,14 +1586,23 @@ class MainWindow(QMainWindow):
         self.flatpak_card.hide()
         self.snap_card.hide()
         self._layout_overview_cards()
+        layout.addWidget(self.overview_heading)
         layout.addWidget(self.overview_group)
         self.overview_note = QLabel(
-            "Teal: applications · Violet: shared or unclassified package bytes. "
-            "Bars show measured bytes within each provider only; "
-            "unknown sizes are excluded. Target counts are not disk percentages."
+            '<span style="color:#278b89">■</span> <b>Teal:</b> applications'
+            '&nbsp;&nbsp;&nbsp; <span style="color:#7c76bc">■</span> '
+            '<b>Violet:</b> shared or unclassified package bytes'
         )
+        self.overview_note.setTextFormat(Qt.TextFormat.RichText)
         self.overview_note.setWordWrap(True)
         layout.addWidget(self.overview_note)
+        layout.addWidget(self.provider_status)
+        self.measurement_note = QLabel(
+            "Bars show measured bytes per provider only. "
+            "Unknown sizes are excluded; target counts are not disk percentages."
+        )
+        self.measurement_note.setWordWrap(True)
+        layout.addWidget(self.measurement_note)
         filters = QHBoxLayout()
         filters.addWidget(QLabel("Source:"))
         self.source_filter = QComboBox()
@@ -1519,6 +1615,11 @@ class MainWindow(QMainWindow):
         self.kind_filter.currentIndexChanged.connect(self.apply_filters)
         filters.addWidget(self.kind_filter)
         filters.addStretch()
+        self.filelight_button = QPushButton("Filelight")
+        self.filelight_button.setToolTip("Open Filelight disk usage analyzer")
+        self.filelight_button.clicked.connect(self.open_filelight)
+        self.filelight_button.setVisible(shutil.which("filelight") is not None)
+        filters.addWidget(self.filelight_button)
         self.user_storage_button = QPushButton("User Storage…")
         self.user_storage_button.clicked.connect(self.open_user_storage)
         filters.addWidget(self.user_storage_button)
@@ -1561,8 +1662,22 @@ class MainWindow(QMainWindow):
         self._flatpak_available = False
         self._snap_available = False
         self.probe = ProviderProbeThread(self)
+        self._probe_statuses = {}
+        self.probe.provider_detected.connect(self.provider_detected)
         self.probe.detected.connect(self.providers_detected)
+        self.provider_status.setText("Detecting installed package managers…")
+        QTimer.singleShot(1000, self.show_slow_provider_detection)
         self.probe.start()
+
+    def open_filelight(self):
+        executable = shutil.which("filelight")
+        if executable is None:
+            QMessageBox.warning(self, "Filelight unavailable", "Filelight is not installed or cannot be found in PATH.")
+            self.filelight_button.hide()
+            return
+        started, _pid = QProcess.startDetached(executable, [])
+        if not started:
+            QMessageBox.warning(self, "Filelight launch failed", "Could not start Filelight. Check the application installation.")
 
     def open_user_storage(self):
         UserStorageDialog(self).exec()
@@ -1686,6 +1801,14 @@ class MainWindow(QMainWindow):
             return
         super().closeEvent(event)
 
+    def show_slow_provider_detection(self) -> None:
+        if len(self._probe_statuses) < 3:
+            self.provider_status.show()
+
+    def provider_detected(self, status: ProviderStatus) -> None:
+        self._probe_statuses[status.name] = status
+        self.providers_detected(self._probe_statuses)
+
     def providers_detected(self, statuses: dict[str, ProviderStatus]) -> None:
         flatpak = statuses.get("flatpak")
         snap = statuses.get("snap")
@@ -1696,27 +1819,38 @@ class MainWindow(QMainWindow):
         self.provider_versions["Flatpak"] = flatpak.version if flatpak and flatpak.available else None
         self.provider_versions["Snap"] = snap.version if snap and snap.available else None
         self.provider_versions["RPM"] = rpm.version if rpm and rpm.available else None
-        self.flatpak_card.setTitle(
-            provider_title("Flatpak", self.provider_versions["Flatpak"])
-        )
-        self.snap_card.setTitle(
-            provider_title("Snap", self.provider_versions["Snap"])
-        )
-        self.rpm_card.setTitle(
-            provider_title("RPM", self.provider_versions["RPM"])
-        )
+        for name, card, status in (
+            ("Flatpak", self.flatpak_card, flatpak),
+            ("Snap", self.snap_card, snap),
+            ("RPM", self.rpm_card, rpm),
+        ):
+            card.setTitle(provider_title(name, status.version if status and status.available else None))
         self._layout_overview_cards()
         self._position_info_buttons()
         self.button.setVisible(self._flatpak_available)
         self.snap_button.setVisible(self._snap_available)
         self.rpm_button.setVisible(self._rpm_available)
-        messages = []
-        for name, status in (("Flatpak", flatpak), ("Snap", snap), ("RPM", rpm)):
-            if status and status.available:
-                messages.append(f"{name} available ({status.version or 'version unknown'}).")
-            else:
-                messages.append(f"{name} unavailable: {status.reason if status else 'not detected'}.")
-        self.provider_status.setText(" ".join(messages))
+        missing = [
+            (f"{name} is not available. It may not be installed."
+             if "not found" in status.reason.lower() or "not installed" in status.reason.lower()
+             else f"{name} detection failed.")
+            for name, status in (("Flatpak", flatpak), ("Snap", snap), ("RPM", rpm))
+            if status is not None and not status.available
+        ]
+        pending = [name for name, status in (
+            ("Flatpak", flatpak), ("Snap", snap), ("RPM", rpm)
+        ) if status is None]
+        messages = list(missing)
+        if pending:
+            messages.append("Detecting: " + ", ".join(pending) + "…")
+        self.provider_status.setText(" · ".join(messages))
+        self.provider_status.setToolTip(" · ".join(
+            f"{name}: {status.reason}" for name, status in
+            (("Flatpak", flatpak), ("Snap", snap), ("RPM", rpm))
+            if status is not None and not status.available
+        ))
+        if not pending:
+            self.provider_status.setVisible(bool(missing))
         self._update_scan_labels()
         self.update_overviews()
 

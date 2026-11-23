@@ -19,12 +19,43 @@ def test_provider_button_only_when_available(monkeypatch):
         "flatpak": ProviderStatus("flatpak", False, "Not installed")
     })
     assert window.button.isHidden()
-    assert "Not installed" in window.provider_status.text()
+    assert "may not be installed" in window.provider_status.text()
+    assert "Not installed" in window.provider_status.toolTip()
     window.providers_detected({
         "flatpak": ProviderStatus("flatpak", True, "Available", "Flatpak 1.16")
     })
     assert window.button.isVisible()
-    assert "Flatpak 1.16" in window.provider_status.text()
+    assert window.flatpak_card.title() == "Flatpak (1.16)"
+    assert "Flatpak available" not in window.provider_status.text()
+    window.close()
+
+
+
+def test_provider_detection_messages_only_show_missing_and_pending(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(gui.ProviderProbeThread, "start", lambda self: None)
+    window = gui.MainWindow()
+    window.show()
+    window.providers_detected({
+        "flatpak": ProviderStatus("flatpak", True, "ok", "Flatpak 1.18"),
+        "snap": ProviderStatus("snap", False, "Snap executable not found"),
+    })
+    assert "Snap is not available. It may not be installed." in window.provider_status.text()
+    assert "Snap executable not found" in window.provider_status.toolTip()
+    assert "Detecting: RPM" in window.provider_status.text()
+    window.providers_detected({
+        "flatpak": ProviderStatus("flatpak", True, "ok", "Flatpak 1.18"),
+        "snap": ProviderStatus("snap", False, "Snap executable not found"),
+        "rpm": ProviderStatus("rpm", True, "ok", "RPM version 6.1.0"),
+    })
+    assert window.provider_status.text() == "Snap is not available. It may not be installed."
+    assert window.provider_status.isVisible()
+    window.providers_detected({
+        "flatpak": ProviderStatus("flatpak", True, "ok", "Flatpak 1.18"),
+        "snap": ProviderStatus("snap", True, "ok", "snap 2.7"),
+        "rpm": ProviderStatus("rpm", True, "ok", "RPM version 6.1.0"),
+    })
+    assert not window.provider_status.isVisible()
     window.close()
 
 
@@ -73,7 +104,8 @@ def test_snap_button_tracks_provider_availability(monkeypatch):
         "snap": ProviderStatus("snap", True, "ok", "snap 2.7"),
     })
     assert window.snap_button.isVisible()
-    assert "Snap available" in window.provider_status.text()
+    assert window.snap_card.title() == "Snap (2.7)"
+    assert "Snap available" not in window.provider_status.text()
     window.close()
 
 
@@ -333,3 +365,56 @@ def test_compact_provider_headers_and_information(monkeypatch):
     assert "Unknown measurements are not zero" in window._provider_information("Flatpak")
     assert "cache and snapshots" in window._provider_information("Snap")
     window.close()
+
+
+def test_filelight_button_visible_when_installed(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(gui.ProviderProbeThread, "start", lambda self: None)
+    monkeypatch.setattr(gui.shutil, "which", lambda name: "/usr/bin/filelight" if name == "filelight" else None)
+    window = gui.MainWindow()
+    window.show()
+    assert window.filelight_button.isVisible()
+    window.close()
+
+
+def test_filelight_button_hidden_when_missing(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(gui.ProviderProbeThread, "start", lambda self: None)
+    monkeypatch.setattr(gui.shutil, "which", lambda name: None)
+    window = gui.MainWindow()
+    window.show()
+    assert window.filelight_button.isHidden()
+    window.close()
+
+
+def test_filelight_launch_uses_detached_process(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(gui.ProviderProbeThread, "start", lambda self: None)
+    monkeypatch.setattr(gui.shutil, "which", lambda name: "/usr/bin/filelight" if name == "filelight" else None)
+    calls = []
+    monkeypatch.setattr(gui.QProcess, "startDetached", lambda executable, args: (calls.append((executable, args)) or (True, 123)))
+    window = gui.MainWindow()
+    window.open_filelight()
+    assert calls == [("/usr/bin/filelight", [])]
+    window.close()
+
+
+def test_user_storage_educational_panel(monkeypatch):
+    from appfootprint.user_storage import UserStorageEntry
+    app = QApplication.instance() or QApplication([])
+    dialog = gui.UserStorageDialog()
+    entries = [
+        UserStorageEntry("Flatpak and other application data", "/home/example/.var", "measured", 4096, 4096, 1, 0),
+        UserStorageEntry("Unidentified hidden directory", "/home/example/.mystery", "measured", 2048, 2048, 1, 0),
+    ]
+    dialog.show_results(entries, [])
+    assert dialog.table.rowCount() == 2
+    for row in range(2):
+        path = dialog.table.item(row, 1).text()
+        dialog.table.selectRow(row)
+        if path.endswith(".var"):
+            assert "Minecraft" in dialog.explanation.text()
+        else:
+            assert "Unknown does not mean unnecessary" in dialog.explanation.text()
+    assert dialog.help_button.text() == "About XDG and Flatpak…"
+    dialog.close()

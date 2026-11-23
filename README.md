@@ -6,7 +6,7 @@ AppFootprint is an early-stage, open-source Linux desktop tool for investigating
 
 Unlike a general disk analyzer, it aims to show **which application a path belongs to**, **which dependencies are shared**, and **what a user should consider before cleaning anything**. Measurements are based on allocated file blocks; they are **not** guaranteed to represent unique physical usage or recoverable space.
 
-## Current features (alpha)
+## Features (v0.2.0)
 
 - Read-only Flatpak app/runtime inventory, with numeric size sorting.
 - Experimental Snap inventory (PR #15): compressed images, active/disabled revisions, shared bases, and current-user Snap data.
@@ -27,7 +27,7 @@ Initial testing targets Fedora KDE. Other Linux desktops are welcome, but are no
 
 Flatpak and Snap are optional at runtime. The UI detects which implemented providers are available. Neither package manager is required to run the unit tests.
 
-## AppImage (experimental alpha)
+## AppImage (v0.2.0, x86_64)
 
 The GitHub Actions **AppImage build (experimental)** workflow produces an x86_64 AppImage and a matching SHA256 checksum. Download both files from the workflow run's artifacts. Verify the checksum from the same directory before running:
 
@@ -37,7 +37,7 @@ chmod +x AppFootprint-x86_64.AppImage
 ./AppFootprint-x86_64.AppImage
 ```
 
-The AppImage has been manually tested on Fedora KDE, but is not yet validated across Linux distributions. It runs without administrator privileges and never deletes application data. The first public pre-release is planned; a workflow artifact is **not** itself a GitHub Release.
+The AppImage has been manually tested on Fedora KDE, but is not yet validated across Linux distributions. It runs without administrator privileges and never deletes application data. The v0.2.0 release is prepared from the tested workflow artifact; a workflow artifact is **not** itself a GitHub Release. For a public release, upload the tested AppImage and its checksum as release assets.
 
 ## Install and run from source
 
@@ -524,3 +524,91 @@ Test Flatpak/Snap/RPM scans, User Storage and nested Storage Investigator,
 Back/Forward, copy-only commands, the KDE launcher/icon and window behavior.
 Try a second distribution with an older glibc before claiming portability.
 The first successful CI build is **not** a release or compatibility guarantee.
+
+
+## Privacy and security (AppFootprint 0.2 audit)
+
+AppFootprint is designed as a **local, read-only inventory and inspection tool**.
+It does not implement telemetry, analytics reporting, an account service,
+automatic cleanup, or application-data deletion. It does not request
+administrator privileges. It displays suggested inspection commands for
+copying, **not execution**.
+
+**External programs and boundaries:** Provider discovery and scans invoke
+installed host commands for local inventory: `flatpak --version`,
+`flatpak list`, `flatpak info`, `snap version`, `snap list --all`,
+`rpm --version`, and `rpm -qa --queryformat`. The Filelight button
+explicitly launches the separately installed Filelight application.
+AppFootprint does not control side effects of those external programs,
+their libraries, or the operating system. Installation of AppFootprint's
+Python dependencies and downloading release artifacts are separate
+activities that may require network access.
+
+**Evidence, not a universal guarantee:** On Fedora KDE, a manual functional
+session exercised Flatpak, RPM, User Storage, information dialogs and
+Filelight under `strace -f -e trace=network`. The inspected log contained
+no AF_INET or AF_INET6 socket operations; local AF_UNIX IPC was observed.
+This is evidence for that run, not a guarantee that no dependency or
+external program can ever communicate over a network. A separate direct
+Filelight launch reproduced its Qt/QML console warnings.
+
+Automated tests use synthetic file trees and mocked package-manager
+commands to compare file contents (SHA-256), names, symlink targets,
+permissions, owners, sizes, modification/change timestamps, and hardlink
+counts before and after User Storage, Storage Investigator, Flatpak, RPM,
+and Snap scans (including Snap cache and snapshots). The Fedora test suite
+passed **139 tests** on 2026-11-23.
+These tests verify the exercised code paths; they do not prove that every
+possible filesystem, package-manager implementation, or GUI operation is
+free of side effects. Access time (`atime`) is excluded because normal
+reads can update it depending on filesystem mount options.
+Snap command behavior is mocked in the regression test; actual snapd
+behavior remains outside this filesystem comparison.
+
+Storage measurements are allocated-block observations, **not** uniquely
+reclaimable bytes. Btrfs sharing, snapshots, hardlinks, missing or
+inaccessible paths, and overlaps across providers limit interpretation.
+The application does not decide that any data is safe to remove.
+
+To repeat the local checks:
+
+```bash
+python -m pytest -q
+strace -f -e trace=network -o /tmp/appfootprint-network.log python -m appfootprint.gui
+```
+
+When sharing logs, redact usernames, paths, application data and secrets.
+
+
+### AppImage supply-chain hardening (security audit follow-up)
+
+The experimental CI build pins GitHub Actions to commit SHAs and pins
+direct Python build tools. It downloads two **fixed-release** x86_64
+AppImage packaging assets and verifies their SHA256 digests **before**
+executing or embedding them:
+
+- `AppImage/appimagetool` release `1.9.1`, SHA256
+  `ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0`.
+- `AppImage/type2-runtime` release `20251108`, SHA256
+  `2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d`.
+
+These hashes are cross-referenced against independently published
+third-party build manifests; the downloaded assets are not trusted as
+their own checksum source. Upstream release metadata and artifact
+integrity should be rechecked when changing either pin.
+
+The workflow no longer requires GitHub Actions repository variables
+for these two pins. `scripts/build-appimage.sh` requires a preverified
+`APPIMAGE_RUNTIME_FILE`, preventing an implicit download of a rolling
+runtime. Local builders must provide that file and an independently
+verified `appimagetool` on `PATH`.
+
+Nuitka no longer automatically approves extra tool downloads. If it
+requests one, investigate and explicitly provision it instead of
+restoring automatic consent.
+
+**Limits:** Python transitive dependencies, apt packages, and build
+environment are not yet hash-locked or reproducible. CI and Fedora
+AppImage launch checks are required before release. The final AppImage
+checksum verifies the distributed artifact, not the trustworthiness of
+the tools used to build it.
