@@ -582,29 +582,33 @@ When sharing logs, redact usernames, paths, application data and secrets.
 
 ### AppImage supply-chain hardening (security audit follow-up)
 
-The experimental AppImage workflow uses commit-SHA-pinned GitHub Actions
-and fixed versions of its directly installed Python build tools. Nuitka
-no longer automatically approves optional tool downloads. These measures
-reduce unexpected build changes but do **not** yet provide a fully
-reproducible, hash-locked dependency environment (including transitive
-Python packages and Ubuntu apt packages).
+The experimental CI build pins GitHub Actions to commit SHAs and pins
+direct Python build tools. It downloads two **fixed-release** x86_64
+AppImage packaging assets and verifies their SHA256 digests **before**
+executing or embedding them:
 
-**Required before an AppImage build:** In the repository's
-**Settings → Secrets and variables → Actions → Variables**, configure:
+- `AppImage/appimagetool` release `1.9.1`, SHA256
+  `ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0`.
+- `AppImage/type2-runtime` release `20251108`, SHA256
+  `2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d`.
 
-- `APPIMAGETOOL_VERSION`: an independently selected, **fixed** release
-  tag from the upstream AppImage/appimagetool project; never `continuous`.
-- `APPIMAGETOOL_SHA256`: the 64-character SHA256 of that exact
-  `appimagetool-x86_64.AppImage` release asset, obtained and verified
-  independently of the downloaded binary.
+These hashes are cross-referenced against independently published
+third-party build manifests; the downloaded assets are not trusted as
+their own checksum source. Upstream release metadata and artifact
+integrity should be rechecked when changing either pin.
 
-The workflow intentionally **fails closed** if either value is absent or
-malformed, or if the downloaded file fails SHA256 verification. Do not
-use a checksum generated from the just-downloaded file as its own
-trust anchor. Updating the tool requires reviewing the release and
-updating both values together.
+The workflow no longer requires GitHub Actions repository variables
+for these two pins. `scripts/build-appimage.sh` requires a preverified
+`APPIMAGE_RUNTIME_FILE`, preventing an implicit download of a rolling
+runtime. Local builders must provide that file and an independently
+verified `appimagetool` on `PATH`.
 
-The resulting AppImage SHA256 file is for verifying the *distributed
-artifact* and is not a substitute for checking the build-tool download.
-If Nuitka requests an extra download, investigate and provision the
-specific dependency explicitly rather than restoring automatic consent.
+Nuitka no longer automatically approves extra tool downloads. If it
+requests one, investigate and explicitly provision it instead of
+restoring automatic consent.
+
+**Limits:** Python transitive dependencies, apt packages, and build
+environment are not yet hash-locked or reproducible. CI and Fedora
+AppImage launch checks are required before release. The final AppImage
+checksum verifies the distributed artifact, not the trustworthiness of
+the tools used to build it.
