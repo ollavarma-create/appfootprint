@@ -481,27 +481,27 @@ class UserStorageDialog(QDialog):
             return
         detail = explain_hidden_directory(path_item.text())
         self.explanation.setText(
-            f"{detail.title} — {detail.category}\\n"
-            f"Purpose: {detail.purpose}\\n"
-            f"May contain: {detail.contents}\\n"
+            f"{detail.title} — {detail.category}\n"
+            f"Purpose: {detail.purpose}\n"
+            f"May contain: {detail.contents}\n"
             f"Important: {detail.caution}"
         )
 
     def show_storage_help(self):
         QMessageBox.information(
             self, "Where Linux applications store data",
-            "XDG Base Directory Specification defines conventional locations:\\n"
-            "~/.config — settings\\n"
-            "~/.local/share — persistent application data\\n"
-            "~/.local/state — application state\\n"
-            "~/.cache — caches\\n\\n"
+            "XDG Base Directory Specification defines conventional locations:\n"
+            "~/.config — settings\n"
+            "~/.local/share — persistent application data\n"
+            "~/.local/state — application state\n"
+            "~/.cache — caches\n\n"
             "Flatpak usually isolates application data in ~/.var/app/<app-id>/, "
             "with its own config, data and cache. Some applications use older "
             "locations such as ~/.mozilla, and permissions can allow access "
-            "outside the sandbox.\\n\\n"
+            "outside the sandbox.\n\n"
             "Directory names do not prove ownership or safe deletion. "
-            "AppFootprint never deletes data.\\n\\n"
-            f"XDG: {XDG_DOCS}\\nFlatpak: {FLATPAK_DOCS}"
+            "AppFootprint never deletes data.\n\n"
+            f"XDG: {XDG_DOCS}\nFlatpak: {FLATPAK_DOCS}"
         )
 
     def open_investigator(self, row, _column):
