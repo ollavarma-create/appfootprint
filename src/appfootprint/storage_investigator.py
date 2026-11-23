@@ -151,7 +151,7 @@ def inspection_commands(path: str) -> tuple[str, str]:
     quoted = shlex.quote(path)
     return (
         f"du -h --max-depth=1 -- {quoted}",
-        f"find {quoted} -type f -size +500M -print",
+        f"du -ah -- {quoted} | sort -h | tail -20",
     )
 
 
