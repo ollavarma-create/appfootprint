@@ -6,7 +6,7 @@ AppFootprint is an early-stage, open-source Linux desktop tool for investigating
 
 Unlike a general disk analyzer, it aims to show **which application a path belongs to**, **which dependencies are shared**, and **what a user should consider before cleaning anything**. Measurements are based on allocated file blocks; they are **not** guaranteed to represent unique physical usage or recoverable space.
 
-## Current features (alpha)
+## Features (v0.2.0)
 
 - Read-only Flatpak app/runtime inventory, with numeric size sorting.
 - Experimental Snap inventory (PR #15): compressed images, active/disabled revisions, shared bases, and current-user Snap data.
@@ -27,7 +27,7 @@ Initial testing targets Fedora KDE. Other Linux desktops are welcome, but are no
 
 Flatpak and Snap are optional at runtime. The UI detects which implemented providers are available. Neither package manager is required to run the unit tests.
 
-## AppImage (experimental alpha)
+## AppImage (v0.2.0, x86_64)
 
 The GitHub Actions **AppImage build (experimental)** workflow produces an x86_64 AppImage and a matching SHA256 checksum. Download both files from the workflow run's artifacts. Verify the checksum from the same directory before running:
 
@@ -37,7 +37,7 @@ chmod +x AppFootprint-x86_64.AppImage
 ./AppFootprint-x86_64.AppImage
 ```
 
-The AppImage has been manually tested on Fedora KDE, but is not yet validated across Linux distributions. It runs without administrator privileges and never deletes application data. The first public pre-release is planned; a workflow artifact is **not** itself a GitHub Release.
+The AppImage has been manually tested on Fedora KDE, but is not yet validated across Linux distributions. It runs without administrator privileges and never deletes application data. The v0.2.0 release is prepared from the tested workflow artifact; a workflow artifact is **not** itself a GitHub Release. For a public release, upload the tested AppImage and its checksum as release assets.
 
 ## Install and run from source
 
