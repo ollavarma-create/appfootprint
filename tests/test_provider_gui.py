@@ -333,3 +333,35 @@ def test_compact_provider_headers_and_information(monkeypatch):
     assert "Unknown measurements are not zero" in window._provider_information("Flatpak")
     assert "cache and snapshots" in window._provider_information("Snap")
     window.close()
+
+
+def test_filelight_button_visible_when_installed(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(gui.ProviderProbeThread, "start", lambda self: None)
+    monkeypatch.setattr(gui.shutil, "which", lambda name: "/usr/bin/filelight" if name == "filelight" else None)
+    window = gui.MainWindow()
+    window.show()
+    assert window.filelight_button.isVisible()
+    window.close()
+
+
+def test_filelight_button_hidden_when_missing(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(gui.ProviderProbeThread, "start", lambda self: None)
+    monkeypatch.setattr(gui.shutil, "which", lambda name: None)
+    window = gui.MainWindow()
+    window.show()
+    assert window.filelight_button.isHidden()
+    window.close()
+
+
+def test_filelight_launch_uses_detached_process(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(gui.ProviderProbeThread, "start", lambda self: None)
+    monkeypatch.setattr(gui.shutil, "which", lambda name: "/usr/bin/filelight" if name == "filelight" else None)
+    calls = []
+    monkeypatch.setattr(gui.QProcess, "startDetached", lambda executable, args: (calls.append((executable, args)) or (True, 123)))
+    window = gui.MainWindow()
+    window.open_filelight()
+    assert calls == [("/usr/bin/filelight", [])]
+    window.close()
