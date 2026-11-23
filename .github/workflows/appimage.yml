@@ -49,28 +49,27 @@ jobs:
         run: |
           desktop-file-validate packaging/appfootprint.desktop
           appstreamcli validate --no-net packaging/io.github.ollavarma_create.appfootprint.metainfo.xml
-      - name: Install verified appimagetool
-        env:
-          # Set these repository variables after independently verifying the release.
-          APPIMAGETOOL_VERSION: ${{ vars.APPIMAGETOOL_VERSION }}
-          APPIMAGETOOL_SHA256: ${{ vars.APPIMAGETOOL_SHA256 }}
+      - name: Install verified AppImage packaging tools
         run: |
           set -euo pipefail
-          if [[ ! "$APPIMAGETOOL_VERSION" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
-            echo "::error::Configure APPIMAGETOOL_VERSION with a fixed release tag (not continuous)."
-            exit 1
-          fi
-          if [[ ! "$APPIMAGETOOL_SHA256" =~ ^[a-fA-F0-9]{64}$ ]]; then
-            echo "::error::Configure APPIMAGETOOL_SHA256 with an independently verified digest."
-            exit 1
-          fi
+          # Immutable release assets; SHA256 values are recorded independently
+          # in public third-party build manifests. Never use "continuous".
+          TOOL_VERSION="1.9.1"
+          TOOL_SHA256="ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0"
+          RUNTIME_VERSION="20251108"
+          RUNTIME_SHA256="2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d"
           curl --fail --location --retry 3 \
-            "https://github.com/AppImage/appimagetool/releases/download/${APPIMAGETOOL_VERSION}/appimagetool-x86_64.AppImage" \
+            "https://github.com/AppImage/appimagetool/releases/download/${TOOL_VERSION}/appimagetool-x86_64.AppImage" \
             -o /tmp/appimagetool.AppImage
-          printf '%s  %s\n' "$APPIMAGETOOL_SHA256" /tmp/appimagetool.AppImage | sha256sum -c -
+          printf '%s  %s\n' "$TOOL_SHA256" /tmp/appimagetool.AppImage | sha256sum -c -
+          curl --fail --location --retry 3 \
+            "https://github.com/AppImage/type2-runtime/releases/download/${RUNTIME_VERSION}/runtime-x86_64" \
+            -o /tmp/appimage-runtime-x86_64
+          printf '%s  %s\n' "$RUNTIME_SHA256" /tmp/appimage-runtime-x86_64 | sha256sum -c -
           chmod +x /tmp/appimagetool.AppImage
           (cd /tmp && /tmp/appimagetool.AppImage --appimage-extract >/dev/null)
           sudo install -m 0755 /tmp/squashfs-root/usr/bin/appimagetool /usr/local/bin/appimagetool
+          echo "APPIMAGE_RUNTIME_FILE=/tmp/appimage-runtime-x86_64" >> "$GITHUB_ENV"
       - name: Build AppImage
         run: |
           export PATH="$VIRTUAL_ENV/bin:$PATH"
