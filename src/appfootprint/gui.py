@@ -29,6 +29,7 @@ from .display import provider_title, inventory_column_labels
 from .user_storage import scan_user_storage
 from .storage_explanations import XDG_DOCS, FLATPAK_DOCS
 from .storage_catalog import identify_directory, load_user_catalog, user_catalog_path
+from .storage_hints import identify_storage_hint
 from .storage_investigator import (investigate, inspection_commands, inspection_script,
                                    allowed_directory, NavigationHistory as StorageNavigationHistory)
 from .unified import combine
@@ -254,6 +255,10 @@ class StorageInvestigatorDialog(QDialog):
         self.commands.setWordWrap(True)
         self.commands.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         layout.addWidget(self.commands)
+        self.hint_label = QLabel("Select a cache directory to see an offline explanation.")
+        self.hint_label.setWordWrap(True)
+        self.hint_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        layout.addWidget(self.hint_label)
         controls = QHBoxLayout()
         self.scan_button = QPushButton("Scan subdirectories")
         self.scan_button.clicked.connect(self.start_scan)
@@ -266,6 +271,10 @@ class StorageInvestigatorDialog(QDialog):
         self.copy_button.setEnabled(False)
         self.copy_button.clicked.connect(self.copy_commands)
         controls.addWidget(self.copy_button)
+        self.copy_search_button = QPushButton("Copy search terms")
+        self.copy_search_button.setEnabled(False)
+        self.copy_search_button.clicked.connect(self.copy_search_terms)
+        controls.addWidget(self.copy_search_button)
         self.copy_path_button = QPushButton("Copy path")
         self.copy_path_button.setEnabled(False)
         self.copy_path_button.clicked.connect(self.copy_path)
@@ -309,6 +318,8 @@ class StorageInvestigatorDialog(QDialog):
         self.commands.setText("Select a row to see inspection commands")
         self.copy_button.setEnabled(False)
         self.copy_path_button.setEnabled(False)
+        self.copy_search_button.setEnabled(False)
+        self.hint_label.setText("Select a cache directory to see an offline explanation.")
 
     def show_results(self, result, error):
         if error:
@@ -348,6 +359,26 @@ class StorageInvestigatorDialog(QDialog):
                               "Select a row to see inspection commands")
         self.copy_button.setEnabled(bool(commands))
         self.copy_path_button.setEnabled(bool(commands))
+        row = self.table.currentRow()
+        path_item = self.table.item(row, 4) if row >= 0 else None
+        hint = identify_storage_hint(path_item.text()) if path_item is not None else None
+        if hint:
+            self.hint_label.setText(
+                f"Why is this here? {hint.title}\\n"
+                f"{hint.explanation}\\n"
+                f"Important: {hint.caution}\\n"
+                f"Suggested search: {hint.search_terms}"
+            )
+        else:
+            self.hint_label.setText("No specific offline explanation for this path.")
+        self.copy_search_button.setEnabled(hint is not None)
+
+    def copy_search_terms(self):
+        row = self.table.currentRow()
+        item = self.table.item(row, 4) if row >= 0 else None
+        hint = identify_storage_hint(item.text()) if item is not None else None
+        if hint:
+            QApplication.clipboard().setText(hint.search_terms)
 
     def copy_commands(self):
         commands = self.selected_commands()
