@@ -87,7 +87,7 @@ def test_discovers_unknown_hidden_directories_and_ignores_regular_files(tmp_path
     assert [Path(e.path).name for e in entries] == [".mystery", ".rustup"]
     assert entries[0].label == "Unidentified hidden directory"
     assert entries[0].status == "measured"
-    assert entries[1].label == "Rust toolchains"
+    assert entries[1].label == "Rustup"
 
 
 def test_nested_xdg_paths_are_not_counted_as_separate_roots(tmp_path):
