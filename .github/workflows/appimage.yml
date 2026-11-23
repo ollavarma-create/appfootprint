@@ -67,7 +67,7 @@ jobs:
           curl --fail --location --retry 3 \
             "https://github.com/AppImage/appimagetool/releases/download/${APPIMAGETOOL_VERSION}/appimagetool-x86_64.AppImage" \
             -o /tmp/appimagetool.AppImage
-          printf '%s  %s\\n' "$APPIMAGETOOL_SHA256" /tmp/appimagetool.AppImage | sha256sum -c -
+          printf '%s  %s\n' "$APPIMAGETOOL_SHA256" /tmp/appimagetool.AppImage | sha256sum -c -
           chmod +x /tmp/appimagetool.AppImage
           (cd /tmp && /tmp/appimagetool.AppImage --appimage-extract >/dev/null)
           sudo install -m 0755 /tmp/squashfs-root/usr/bin/appimagetool /usr/local/bin/appimagetool
