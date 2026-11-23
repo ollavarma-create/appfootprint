@@ -27,7 +27,8 @@ from .providers.rpm import RpmProvider
 from .rpm_dependencies import scan_rpm_capabilities
 from .display import provider_title, inventory_column_labels
 from .user_storage import scan_user_storage
-from .storage_explanations import explain_hidden_directory, XDG_DOCS, FLATPAK_DOCS
+from .storage_explanations import XDG_DOCS, FLATPAK_DOCS
+from .storage_catalog import identify_directory, load_user_catalog, user_catalog_path
 from .storage_investigator import (investigate, inspection_commands, inspection_script,
                                    allowed_directory, NavigationHistory as StorageNavigationHistory)
 from .unified import combine
@@ -472,6 +473,7 @@ class UserStorageDialog(QDialog):
         controls.addWidget(close)
         layout.addLayout(controls)
         self.worker = None
+        self.directory_catalog = load_user_catalog()
 
     def show_directory_explanation(self):
         row = self.table.currentRow()
@@ -479,7 +481,7 @@ class UserStorageDialog(QDialog):
         if path_item is None:
             self.explanation.setText("Select a directory to learn what it may contain and why it matters.")
             return
-        detail = explain_hidden_directory(path_item.text())
+        detail = identify_directory(path_item.text(), self.directory_catalog)
         self.explanation.setText(
             f"{detail.title} — {detail.category}\n"
             f"Purpose: {detail.purpose}\n"
@@ -501,7 +503,9 @@ class UserStorageDialog(QDialog):
             "outside the sandbox.\n\n"
             "Directory names do not prove ownership or safe deletion. "
             "AppFootprint never deletes data.\n\n"
-            f"XDG: {XDG_DOCS}\nFlatpak: {FLATPAK_DOCS}"
+            f"XDG: {XDG_DOCS}\nFlatpak: {FLATPAK_DOCS}\n\n"
+            f"Optional user catalog: {user_catalog_path()}\n"
+            "Only local JSON data is read. Built-in safety descriptions take precedence."
         )
 
     def open_investigator(self, row, _column):
@@ -536,6 +540,7 @@ class UserStorageDialog(QDialog):
         self.cancel_button.setEnabled(False)
 
     def show_results(self, entries, issues):
+        self.directory_catalog = load_user_catalog()
         self.table.setSortingEnabled(False)
         self.table.clearSelection()
         self.table.setRowCount(len(entries))
@@ -554,7 +559,7 @@ class UserStorageDialog(QDialog):
                     cell.setToolTip(allocated_tooltip(
                         entry.known_allocated_bytes, incomplete=True))
                 elif column == 0:
-                    detail = explain_hidden_directory(entry.path)
+                    detail = identify_directory(entry.path, self.directory_catalog)
                     cell.setToolTip(f"{detail.purpose}\\n{detail.caution}")
                 elif entry.reason:
                     cell.setToolTip(entry.reason)
