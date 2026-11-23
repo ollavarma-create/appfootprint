@@ -1,3 +1,4 @@
+from html import escape
 """Qt interface for read-only Flatpak storage inventory."""
 from __future__ import annotations
 
@@ -250,12 +251,14 @@ class StorageInvestigatorDialog(QDialog):
         self.table.itemSelectionChanged.connect(self.show_commands)
         self.table.cellDoubleClicked.connect(self.open_child)
         layout.addWidget(self.table)
-        layout.addWidget(QLabel("Inspection examples (copy only; no execution):"))
+        self.inspection_heading = QLabel("<b>Inspection examples</b> (copy only; no execution):")
+        layout.addWidget(self.inspection_heading)
         self.commands = QLabel("Select a row to see inspection commands")
         self.commands.setWordWrap(True)
         self.commands.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         layout.addWidget(self.commands)
         self.hint_label = QLabel("Select a cache directory to see an offline explanation.")
+        self.hint_label.setTextFormat(Qt.TextFormat.RichText)
         self.hint_label.setWordWrap(True)
         self.hint_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         layout.addWidget(self.hint_label)
@@ -364,10 +367,10 @@ class StorageInvestigatorDialog(QDialog):
         hint = identify_storage_hint(path_item.text()) if path_item is not None else None
         if hint:
             self.hint_label.setText(
-                f"Why is this here? {hint.title}\n"
-                f"{hint.explanation}\n"
-                f"Important: {hint.caution}\n"
-                f"Suggested search: {hint.search_terms}"
+                f"<b>Why is this here?</b> {escape(hint.title)}<br>"
+                f"{escape(hint.explanation)}<br>"
+                f"<b>Important:</b> {escape(hint.caution)}<br>"
+                f"<b>Suggested search:</b> {escape(hint.search_terms)}"
             )
         else:
             self.hint_label.setText("No specific offline explanation for this path.")
