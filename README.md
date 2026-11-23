@@ -6,6 +6,10 @@ AppFootprint is an early-stage, open-source Linux desktop tool for investigating
 
 Unlike a general disk analyzer, it aims to show **which application a path belongs to**, **which dependencies are shared**, and **what a user should consider before cleaning anything**. Measurements are based on allocated file blocks; they are **not** guaranteed to represent unique physical usage or recoverable space.
 
+![AppFootprint main screen](main-screen.png)
+*AppFootprint main screen shows Flatpak, Snap and RPM installations*
+
+
 ## Features (v0.2.0)
 
 - Read-only Flatpak app/runtime inventory, with numeric size sorting.
@@ -17,6 +21,21 @@ Unlike a general disk analyzer, it aims to show **which application a path belon
 - Scan progress and cancellation.
 
 Initial testing targets Fedora KDE. Other Linux desktops are welcome, but are not yet comprehensively validated. The app does not require administrator privileges.
+
+![Dependecy explorer](dependency-explorer.png)
+*Dependency explorer*
+
+![Hidden home directories](hidden-home-directories.png)
+*Hidden home directories explained*
+
+![Where stored explained](where-stored.png)
+*Explanation what those hidded paths might be*
+
+
+![Storage investigator](storage-investigator.png)
+*Storeage explorer explained*
+
+
 
 ## Requirements
 
