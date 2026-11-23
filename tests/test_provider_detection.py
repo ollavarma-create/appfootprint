@@ -82,3 +82,30 @@ def test_snap_version_whitespace_normalized(monkeypatch):
     status = detection.probe_snap()
     assert status.available
     assert status.version == "snap 2.77.1-0.fc44"
+
+
+def test_rpm_probe_uses_longer_inventory_timeout(monkeypatch):
+    monkeypatch.setattr(detection.shutil, "which", lambda _: "/usr/bin/rpm")
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append((argv, kwargs["timeout"]))
+        return subprocess.CompletedProcess(argv, 0, stdout="RPM version 6.1.0")
+
+    monkeypatch.setattr(detection.subprocess, "run", fake_run)
+    assert detection.probe_rpm().available
+    assert calls[1][1] == 10.0
+
+
+def test_rpm_probe_timeout_is_reported_not_misclassified(monkeypatch):
+    monkeypatch.setattr(detection.shutil, "which", lambda _: "/usr/bin/rpm")
+
+    def fake_run(argv, **kwargs):
+        if "-qa" in argv:
+            raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+        return subprocess.CompletedProcess(argv, 0, stdout="RPM version 6.1.0")
+
+    monkeypatch.setattr(detection.subprocess, "run", fake_run)
+    status = detection.probe_rpm()
+    assert not status.available
+    assert "time" in status.reason.lower()
