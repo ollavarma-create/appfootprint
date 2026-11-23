@@ -55,7 +55,7 @@ def test_flatpak_scan_preserves_deployment_and_user_data(tmp_path, monkeypatch):
     def fake_run(*args):
         commands.append(args)
         if args[0] == "list":
-            return ("org.example.App\\tapp/org.example.App/x86_64/stable\\tsystem\\n"
+            return ("org.example.App\tapp/org.example.App/x86_64/stable\tsystem\n"
                     if "--app" in args else "")
         if "--show-location" in args:
             return str(deployment)
