@@ -1540,7 +1540,7 @@ class MainWindow(QMainWindow):
         self.storage_summary = QLabel("Snap cache and snapshots: not measured.")
         self.storage_summary.setWordWrap(True)
         self.storage_summary.hide()
-        self.provider_status = QLabel("Checking available package providers…")
+        self.provider_status = QLabel("Detecting installed package managers…")
         self.provider_status.setWordWrap(True)
         self.provider_status.hide()
         self.overview_group = QGroupBox("Storage overview — reported bytes, not reclaimable space")
@@ -1585,15 +1585,22 @@ class MainWindow(QMainWindow):
         self.flatpak_card.hide()
         self.snap_card.hide()
         self._layout_overview_cards()
-        layout.addWidget(self.overview_group)
         layout.addWidget(self.provider_status)
+        layout.addWidget(self.overview_group)
         self.overview_note = QLabel(
-            "Teal: applications · Violet: shared or unclassified package bytes. "
-            "Bars show measured bytes within each provider only; "
-            "unknown sizes are excluded. Target counts are not disk percentages."
+            '<span style="color:#278b89">■</span> <b>Teal:</b> applications'
+            '&nbsp;&nbsp;&nbsp; <span style="color:#7c76bc">■</span> '
+            '<b>Violet:</b> shared or unclassified package bytes'
         )
+        self.overview_note.setTextFormat(Qt.TextFormat.RichText)
         self.overview_note.setWordWrap(True)
         layout.addWidget(self.overview_note)
+        self.measurement_note = QLabel(
+            "Bars show measured bytes per provider only. "
+            "Unknown sizes are excluded; target counts are not disk percentages."
+        )
+        self.measurement_note.setWordWrap(True)
+        layout.addWidget(self.measurement_note)
         filters = QHBoxLayout()
         filters.addWidget(QLabel("Source:"))
         self.source_filter = QComboBox()
@@ -1821,17 +1828,19 @@ class MainWindow(QMainWindow):
         self.button.setVisible(self._flatpak_available)
         self.snap_button.setVisible(self._snap_available)
         self.rpm_button.setVisible(self._rpm_available)
-        messages = []
-        for name, status in (("Flatpak", flatpak), ("Snap", snap), ("RPM", rpm)):
-            if status is None:
-                messages.append(f"{name}: Detecting…")
-            elif status.available:
-                messages.append(f"{name} available ({status.version or 'version unknown'}).")
-            else:
-                messages.append(f"{name} unavailable: {status.reason}")
-        self.provider_status.setText(" ".join(messages))
-        if len(statuses) == 3:
-            self.provider_status.setVisible(any(not s.available for s in statuses.values()))
+        missing = [
+            f"{name}: {status.reason}"
+            for name, status in (("Flatpak", flatpak), ("Snap", snap), ("RPM", rpm))
+            if status is not None and not status.available
+        ]
+        pending = [name for name, status in (
+            ("Flatpak", flatpak), ("Snap", snap), ("RPM", rpm)
+        ) if status is None]
+        if pending:
+            self.provider_status.setText("Detecting: " + ", ".join(pending) + "…")
+        else:
+            self.provider_status.setText(" · ".join(missing))
+            self.provider_status.setVisible(bool(missing))
         self._update_scan_labels()
         self.update_overviews()
 
