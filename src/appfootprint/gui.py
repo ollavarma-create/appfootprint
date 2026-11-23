@@ -1543,7 +1543,8 @@ class MainWindow(QMainWindow):
         self.provider_status = QLabel("Detecting installed package managers…")
         self.provider_status.setWordWrap(True)
         self.provider_status.hide()
-        self.overview_group = QGroupBox("Storage overview — reported bytes, not reclaimable space")
+        self.overview_group = QGroupBox()
+        self.overview_heading = QLabel("Storage overview — reported bytes, not reclaimable space")
         self.overview_grid = QGridLayout(self.overview_group)
         self.overview_grid.setContentsMargins(8, 8, 8, 8)
         self.overview_grid.setSpacing(8)
@@ -1585,7 +1586,11 @@ class MainWindow(QMainWindow):
         self.flatpak_card.hide()
         self.snap_card.hide()
         self._layout_overview_cards()
-        layout.addWidget(self.provider_status)
+        overview_heading_row = QHBoxLayout()
+        overview_heading_row.addWidget(self.overview_heading)
+        overview_heading_row.addWidget(self.provider_status)
+        overview_heading_row.addStretch()
+        layout.addLayout(overview_heading_row)
         layout.addWidget(self.overview_group)
         self.overview_note = QLabel(
             '<span style="color:#278b89">■</span> <b>Teal:</b> applications'
@@ -1829,7 +1834,9 @@ class MainWindow(QMainWindow):
         self.snap_button.setVisible(self._snap_available)
         self.rpm_button.setVisible(self._rpm_available)
         missing = [
-            f"{name}: {status.reason}"
+            (f"{name} is not available. It may not be installed."
+             if "not found" in status.reason.lower() or "not installed" in status.reason.lower()
+             else f"{name} detection failed.")
             for name, status in (("Flatpak", flatpak), ("Snap", snap), ("RPM", rpm))
             if status is not None and not status.available
         ]
@@ -1840,6 +1847,11 @@ class MainWindow(QMainWindow):
         if pending:
             messages.append("Detecting: " + ", ".join(pending) + "…")
         self.provider_status.setText(" · ".join(messages))
+        self.provider_status.setToolTip(" · ".join(
+            f"{name}: {status.reason}" for name, status in
+            (("Flatpak", flatpak), ("Snap", snap), ("RPM", rpm))
+            if status is not None and not status.available
+        ))
         if not pending:
             self.provider_status.setVisible(bool(missing))
         self._update_scan_labels()
