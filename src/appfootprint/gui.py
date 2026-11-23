@@ -1836,10 +1836,11 @@ class MainWindow(QMainWindow):
         pending = [name for name, status in (
             ("Flatpak", flatpak), ("Snap", snap), ("RPM", rpm)
         ) if status is None]
+        messages = list(missing)
         if pending:
-            self.provider_status.setText("Detecting: " + ", ".join(pending) + "…")
-        else:
-            self.provider_status.setText(" · ".join(missing))
+            messages.append("Detecting: " + ", ".join(pending) + "…")
+        self.provider_status.setText(" · ".join(messages))
+        if not pending:
             self.provider_status.setVisible(bool(missing))
         self._update_scan_labels()
         self.update_overviews()
