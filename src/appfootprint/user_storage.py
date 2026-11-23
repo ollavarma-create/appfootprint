@@ -12,19 +12,8 @@ import stat
 from typing import Callable
 
 from .scanner import check_cancel
+from .storage_catalog import identify_directory, load_user_catalog
 
-# Labels are explanatory only; discovery never depends on this mapping.
-KNOWN_DIRECTORIES = {
-    ".cache": "Cache (mixed applications)",
-    ".config": "Configuration (mixed applications)",
-    ".local": "Local application data (mixed)",
-    ".var": "Flatpak and other application data",
-    ".rustup": "Rust toolchains",
-    ".cargo": "Cargo tools and cache",
-    ".npm": "npm cache and metadata",
-    ".gradle": "Gradle cache and metadata",
-    ".m2": "Maven dependencies and configuration",
-}
 
 
 @dataclass(frozen=True)
@@ -96,6 +85,7 @@ def scan_user_storage(
                                 key=lambda path: path.name)
     except OSError as exc:
         return [], [f"Cannot list home directory: {exc}"]
+    catalog = load_user_catalog()
     for path in candidates:
         check_cancel(cancelled)
         try:
@@ -108,7 +98,7 @@ def scan_user_storage(
             continue
         if progress:
             progress(f"Measuring {path.name}…")
-        label = KNOWN_DIRECTORIES.get(path.name, "Unidentified hidden directory")
+        label = identify_directory(path, catalog).title
         known, files, skipped, reason = _measure(path, cancelled)
         entries.append(UserStorageEntry(
             label, str(path), "incomplete" if skipped else "measured",
