@@ -578,3 +578,33 @@ strace -f -e trace=network -o /tmp/appfootprint-network.log python -m appfootpri
 ```
 
 When sharing logs, redact usernames, paths, application data and secrets.
+
+
+### AppImage supply-chain hardening (security audit follow-up)
+
+The experimental AppImage workflow uses commit-SHA-pinned GitHub Actions
+and fixed versions of its directly installed Python build tools. Nuitka
+no longer automatically approves optional tool downloads. These measures
+reduce unexpected build changes but do **not** yet provide a fully
+reproducible, hash-locked dependency environment (including transitive
+Python packages and Ubuntu apt packages).
+
+**Required before an AppImage build:** In the repository's
+**Settings → Secrets and variables → Actions → Variables**, configure:
+
+- `APPIMAGETOOL_VERSION`: an independently selected, **fixed** release
+  tag from the upstream AppImage/appimagetool project; never `continuous`.
+- `APPIMAGETOOL_SHA256`: the 64-character SHA256 of that exact
+  `appimagetool-x86_64.AppImage` release asset, obtained and verified
+  independently of the downloaded binary.
+
+The workflow intentionally **fails closed** if either value is absent or
+malformed, or if the downloaded file fails SHA256 verification. Do not
+use a checksum generated from the just-downloaded file as its own
+trust anchor. Updating the tool requires reviewing the release and
+updating both values together.
+
+The resulting AppImage SHA256 file is for verifying the *distributed
+artifact* and is not a substitute for checking the build-tool download.
+If Nuitka requests an extra download, investigate and provision the
+specific dependency explicitly rather than restoring automatic consent.
