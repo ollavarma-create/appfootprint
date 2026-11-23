@@ -365,3 +365,24 @@ def test_filelight_launch_uses_detached_process(monkeypatch):
     window.open_filelight()
     assert calls == [("/usr/bin/filelight", [])]
     window.close()
+
+
+def test_user_storage_educational_panel(monkeypatch):
+    from appfootprint.user_storage import UserStorageEntry
+    app = QApplication.instance() or QApplication([])
+    dialog = gui.UserStorageDialog()
+    entries = [
+        UserStorageEntry("Flatpak and other application data", "/home/example/.var", "measured", 4096, 4096, 1, 0),
+        UserStorageEntry("Unidentified hidden directory", "/home/example/.mystery", "measured", 2048, 2048, 1, 0),
+    ]
+    dialog.show_results(entries, [])
+    assert dialog.table.rowCount() == 2
+    for row in range(2):
+        path = dialog.table.item(row, 1).text()
+        dialog.table.selectRow(row)
+        if path.endswith(".var"):
+            assert "Minecraft" in dialog.explanation.text()
+        else:
+            assert "Unknown does not mean unnecessary" in dialog.explanation.text()
+    assert dialog.help_button.text() == "About XDG and Flatpak…"
+    dialog.close()
