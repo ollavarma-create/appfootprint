@@ -555,14 +555,15 @@ Filelight launch reproduced its Qt/QML console warnings.
 Automated tests use synthetic file trees and mocked package-manager
 commands to compare file contents (SHA-256), names, symlink targets,
 permissions, owners, sizes, modification/change timestamps, and hardlink
-counts before and after User Storage, Storage Investigator, Flatpak, and
-RPM scans. The Fedora test suite passed **138 tests** on 2026-11-23.
+counts before and after User Storage, Storage Investigator, Flatpak, RPM,
+and Snap scans (including Snap cache and snapshots). The Fedora test suite
+passed **139 tests** on 2026-11-23.
 These tests verify the exercised code paths; they do not prove that every
 possible filesystem, package-manager implementation, or GUI operation is
 free of side effects. Access time (`atime`) is excluded because normal
-reads can update it depending on filesystem mount options. Snap has
-existing synthetic coverage but is not included in this specific
-before/after immutability regression.
+reads can update it depending on filesystem mount options.
+Snap command behavior is mocked in the regression test; actual snapd
+behavior remains outside this filesystem comparison.
 
 Storage measurements are allocated-block observations, **not** uniquely
 reclaimable bytes. Btrfs sharing, snapshots, hardlinks, missing or
