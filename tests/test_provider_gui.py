@@ -24,7 +24,7 @@ def test_provider_button_only_when_available(monkeypatch):
         "flatpak": ProviderStatus("flatpak", True, "Available", "Flatpak 1.16")
     })
     assert window.button.isVisible()
-    assert "Flatpak 1.16" in window.flatpak_card.title()
+    assert window.flatpak_card.title() == "Flatpak (1.16)"
     assert "Flatpak available" not in window.provider_status.text()
     window.close()
 
@@ -102,7 +102,7 @@ def test_snap_button_tracks_provider_availability(monkeypatch):
         "snap": ProviderStatus("snap", True, "ok", "snap 2.7"),
     })
     assert window.snap_button.isVisible()
-    assert "snap 2.7" in window.snap_card.title()
+    assert window.snap_card.title() == "Snap (2.7)"
     assert "Snap available" not in window.provider_status.text()
     window.close()
 
