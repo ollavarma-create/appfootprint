@@ -1,6 +1,7 @@
-from html import escape
 """Qt interface for read-only Flatpak storage inventory."""
 from __future__ import annotations
+
+from html import escape
 
 import sys
 import shutil
