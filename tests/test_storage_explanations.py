@@ -30,3 +30,16 @@ def test_sensitive_directories_warn_about_keys():
 def test_known_name_is_only_a_hint():
     info = explain_hidden_directory("/home/example/.vscode")
     assert "Common" in info.purpose
+
+
+def test_additional_ide_and_java_names_are_recognized():
+    from appfootprint.storage_catalog import identify_directory
+    for name in (".vscode-shared", ".idea", ".java", ".copilot"):
+        assert identify_directory(name).category != "Unknown"
+
+
+def test_gnupg_backup_is_not_treated_as_disposable():
+    from appfootprint.storage_catalog import identify_directory
+    detail = identify_directory(".gnupg-backup")
+    assert "private keys" in detail.caution.lower()
+    assert "backup" in detail.title.lower()
