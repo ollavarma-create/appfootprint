@@ -1586,6 +1586,7 @@ class MainWindow(QMainWindow):
         self.snap_card.hide()
         self._layout_overview_cards()
         layout.addWidget(self.overview_group)
+        layout.addWidget(self.provider_status)
         self.overview_note = QLabel(
             "Teal: applications · Violet: shared or unclassified package bytes. "
             "Bars show measured bytes within each provider only; "
