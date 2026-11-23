@@ -1,4 +1,4 @@
-"""Synthetic XDG inventory tests; never inspect the real home directory."""
+"""Synthetic hidden-directory inventory tests; never inspect the real home directory."""
 import os
 from pathlib import Path
 
@@ -11,8 +11,7 @@ from appfootprint.user_storage import scan_user_storage
 def test_missing_directories_are_absent(tmp_path):
     entries, issues = scan_user_storage(tmp_path)
     assert not issues
-    assert len(entries) == 5
-    assert all(e.status == "absent" and e.allocated_bytes == 0 for e in entries)
+    assert entries == []
 
 
 def test_files_and_symlinks_are_not_followed(tmp_path):
@@ -47,9 +46,9 @@ def test_hardlinks_count_once_per_tree(tmp_path):
 
 def test_symlinked_target_not_followed(tmp_path):
     (tmp_path / ".cache").symlink_to(tmp_path, target_is_directory=True)
-    entry = scan_user_storage(tmp_path)[0][0]
-    assert entry.status == "error"
-    assert entry.allocated_bytes is None
+    entries, issues = scan_user_storage(tmp_path)
+    assert entries == []
+    assert issues == []
 
 
 def test_cancelled_scan(tmp_path):
@@ -75,3 +74,41 @@ def test_partial_tree_keeps_subtotal_unknown(monkeypatch, tmp_path):
     assert entry.allocated_bytes is None
     assert entry.skipped == 1
     assert entry.known_allocated_bytes >= 0
+
+
+def test_discovers_unknown_hidden_directories_and_ignores_regular_files(tmp_path):
+    (tmp_path / ".mystery").mkdir()
+    (tmp_path / ".mystery" / "data").write_bytes(b"some data")
+    (tmp_path / ".rustup").mkdir()
+    (tmp_path / ".hidden-file").write_text("not a directory")
+    (tmp_path / "visible").mkdir()
+    entries, issues = scan_user_storage(tmp_path)
+    assert not issues
+    assert [Path(e.path).name for e in entries] == [".mystery", ".rustup"]
+    assert entries[0].label == "Unidentified hidden directory"
+    assert entries[0].status == "measured"
+    assert entries[1].label == "Rust toolchains"
+
+
+def test_nested_xdg_paths_are_not_counted_as_separate_roots(tmp_path):
+    (tmp_path / ".local" / "share").mkdir(parents=True)
+    (tmp_path / ".local" / "share" / "data").write_bytes(b"x")
+    entries, _ = scan_user_storage(tmp_path)
+    assert len(entries) == 1
+    assert Path(entries[0].path).name == ".local"
+
+
+def test_unreadable_home_reports_issue(monkeypatch, tmp_path):
+    from appfootprint import user_storage
+    original = user_storage.os.scandir
+
+    def denied(path):
+        if Path(path) == tmp_path:
+            raise PermissionError("synthetic denied")
+        return original(path)
+
+    monkeypatch.setattr(user_storage.os, "scandir", denied)
+    entries, issues = scan_user_storage(tmp_path)
+    assert entries == []
+    assert len(issues) == 1
+    assert "Cannot list home directory" in issues[0]
