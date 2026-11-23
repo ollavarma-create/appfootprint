@@ -24,7 +24,36 @@ def test_provider_button_only_when_available(monkeypatch):
         "flatpak": ProviderStatus("flatpak", True, "Available", "Flatpak 1.16")
     })
     assert window.button.isVisible()
-    assert "Flatpak 1.16" in window.provider_status.text()
+    assert "Flatpak 1.16" in window.flatpak_card.title()
+    assert "Flatpak available" not in window.provider_status.text()
+    window.close()
+
+
+
+def test_provider_detection_messages_only_show_missing_and_pending(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(gui.ProviderProbeThread, "start", lambda self: None)
+    window = gui.MainWindow()
+    window.show()
+    window.providers_detected({
+        "flatpak": ProviderStatus("flatpak", True, "ok", "Flatpak 1.18"),
+        "snap": ProviderStatus("snap", False, "Snap executable not found"),
+    })
+    assert "Snap executable not found" in window.provider_status.text()
+    assert "Detecting: RPM" in window.provider_status.text()
+    window.providers_detected({
+        "flatpak": ProviderStatus("flatpak", True, "ok", "Flatpak 1.18"),
+        "snap": ProviderStatus("snap", False, "Snap executable not found"),
+        "rpm": ProviderStatus("rpm", True, "ok", "RPM version 6.1.0"),
+    })
+    assert window.provider_status.text() == "Snap: Snap executable not found"
+    assert window.provider_status.isVisible()
+    window.providers_detected({
+        "flatpak": ProviderStatus("flatpak", True, "ok", "Flatpak 1.18"),
+        "snap": ProviderStatus("snap", True, "ok", "snap 2.7"),
+        "rpm": ProviderStatus("rpm", True, "ok", "RPM version 6.1.0"),
+    })
+    assert not window.provider_status.isVisible()
     window.close()
 
 
@@ -73,7 +102,8 @@ def test_snap_button_tracks_provider_availability(monkeypatch):
         "snap": ProviderStatus("snap", True, "ok", "snap 2.7"),
     })
     assert window.snap_button.isVisible()
-    assert "Snap available" in window.provider_status.text()
+    assert "snap 2.7" in window.snap_card.title()
+    assert "Snap available" not in window.provider_status.text()
     window.close()
 
 
