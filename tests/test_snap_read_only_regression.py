@@ -53,10 +53,10 @@ def test_snap_inventory_and_storage_preserve_files(tmp_path, monkeypatch):
     (tmp_path / "unrelated").write_text("untouched")
 
     output = (
-        "Name      Version      Rev    Tracking       Publisher     Notes\\n"
-        "example   1.0          42     latest/stable  example       -\\n"
-        "example   0.9          41     latest/stable  example       disabled\\n"
-        "core22    2026         2000   latest/stable  canonical     base\\n"
+        "Name      Version      Rev    Tracking       Publisher     Notes\n"
+        "example   1.0          42     latest/stable  example       -\n"
+        "example   0.9          41     latest/stable  example       disabled\n"
+        "core22    2026         2000   latest/stable  canonical     base\n"
     )
     commands = []
 
