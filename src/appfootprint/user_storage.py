@@ -1,4 +1,4 @@
-"""Read-only, bounded-scope XDG user storage inventory.
+"""Read-only, bounded-scope hidden home-directory inventory.
 
 Directory measurements are independent observations, not additive with
 Flatpak or other provider totals. Never follow symlinks or cross mountpoints.
@@ -13,13 +13,18 @@ from typing import Callable
 
 from .scanner import check_cancel
 
-TARGETS = (
-    ("Cache", ".cache"),
-    ("Configuration", ".config"),
-    ("Application data", ".local/share"),
-    ("Application state", ".local/state"),
-    ("Flatpak user data", ".var/app"),
-)
+# Labels are explanatory only; discovery never depends on this mapping.
+KNOWN_DIRECTORIES = {
+    ".cache": "Cache (mixed applications)",
+    ".config": "Configuration (mixed applications)",
+    ".local": "Local application data (mixed)",
+    ".var": "Flatpak and other application data",
+    ".rustup": "Rust toolchains",
+    ".cargo": "Cargo tools and cache",
+    ".npm": "npm cache and metadata",
+    ".gradle": "Gradle cache and metadata",
+    ".m2": "Maven dependencies and configuration",
+}
 
 
 @dataclass(frozen=True)
@@ -82,29 +87,31 @@ def scan_user_storage(
 ) -> tuple[list[UserStorageEntry], list[str]]:
     home = Path.home() if home is None else Path(home)
     entries: list[UserStorageEntry] = []
-    for label, relative in TARGETS:
+    issues: list[str] = []
+    try:
+        # Snapshot only the immediate children of home; never follow links.
+        with os.scandir(home) as listing:
+            candidates = sorted((Path(item.path) for item in listing
+                                 if item.name.startswith(".") and item.name not in (".", "..")),
+                                key=lambda path: path.name)
+    except OSError as exc:
+        return [], [f"Cannot list home directory: {exc}"]
+    for path in candidates:
         check_cancel(cancelled)
-        if progress:
-            progress(f"Measuring {relative}…")
-        path = home / relative
         try:
             info = path.lstat()
-        except FileNotFoundError:
-            entries.append(UserStorageEntry(label, str(path), "absent", 0, 0, 0, 0))
-            continue
-        except PermissionError as exc:
-            entries.append(UserStorageEntry(label, str(path), "inaccessible", None, 0, 0, 1, str(exc)))
-            continue
         except OSError as exc:
-            entries.append(UserStorageEntry(label, str(path), "error", None, 0, 0, 1, str(exc)))
+            issues.append(f"{path.name}: {exc}")
             continue
+        # Only actual directories qualify. Dotfiles and symlinks are not traversed.
         if not stat.S_ISDIR(info.st_mode):
-            entries.append(UserStorageEntry(label, str(path), "error", None, 0, 0, 1,
-                                            "Not a real directory (symlink or file)"))
             continue
+        if progress:
+            progress(f"Measuring {path.name}…")
+        label = KNOWN_DIRECTORIES.get(path.name, "Unidentified hidden directory")
         known, files, skipped, reason = _measure(path, cancelled)
         entries.append(UserStorageEntry(
             label, str(path), "incomplete" if skipped else "measured",
             None if skipped else known, known, files, skipped, reason))
     check_cancel(cancelled)
-    return entries, []
+    return entries, issues
