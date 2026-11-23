@@ -52,6 +52,31 @@ EXPLANATIONS = {
         "Extensions and support files; settings may be elsewhere.",
         "Removing extensions may require reinstalling them; inspect the actual contents.",
         "Development tools"),
+    ".vscode-shared": StorageExplanation(
+        "VS Code shared data", "A directory apparently associated with a VS Code installation or variant.",
+        "May contain shared editor support files; actual origin is not established by the name alone.",
+        "Check which application created it before changing anything.",
+        "Development tools / uncertain"),
+    ".idea": StorageExplanation(
+        "JetBrains IDE project settings", "Conventionally stores IntelliJ-platform project metadata.",
+        "Project configuration, run configurations and workspace state.",
+        "Usually belongs inside a project; a home-level ~/.idea is unusual and its contents should be inspected.",
+        "Development tools / project metadata"),
+    ".java": StorageExplanation(
+        "Java user data", "Conventional per-user directory used by some Java components.",
+        "Java preferences, deployment state or other runtime-specific files.",
+        "May contain settings and state; do not assume it is only a cache.",
+        "Runtime / application data"),
+    ".copilot": StorageExplanation(
+        "Copilot-related data (unverified)", "The name suggests a Copilot integration, but does not prove which application created it.",
+        "Potentially local application settings, state or support files.",
+        "Check the actual contents before attributing it to GitHub Copilot or removing anything.",
+        "Application data / uncertain"),
+    ".gnupg-backup": StorageExplanation(
+        "Possible GnuPG backup", "The name suggests a backup of the GnuPG home directory.",
+        "Potentially private keys, trust databases, configuration and other sensitive cryptographic material.",
+        "Critical: may contain irreplaceable private keys. Do not delete or expose this directory based on its name.",
+        "Sensitive credentials / possible backup"),
     ".platformio": StorageExplanation(
         "PlatformIO", "Common PlatformIO development-tool storage.",
         "Downloaded platforms, toolchains, packages and configuration.",
