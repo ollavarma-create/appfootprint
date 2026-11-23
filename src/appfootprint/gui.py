@@ -27,6 +27,7 @@ from .providers.rpm import RpmProvider
 from .rpm_dependencies import scan_rpm_capabilities
 from .display import provider_title, inventory_column_labels
 from .user_storage import scan_user_storage
+from .storage_explanations import explain_hidden_directory, XDG_DOCS, FLATPAK_DOCS
 from .storage_investigator import (investigate, inspection_commands, inspection_script,
                                    allowed_directory, NavigationHistory as StorageNavigationHistory)
 from .unified import combine
@@ -447,6 +448,14 @@ class UserStorageDialog(QDialog):
         self.table.horizontalHeader().setStretchLastSection(True)
         layout.addWidget(self.table)
         self.table.cellDoubleClicked.connect(self.open_investigator)
+        self.table.itemSelectionChanged.connect(self.show_directory_explanation)
+        self.explanation = QLabel("Select a directory to learn what it may contain and why it matters.")
+        self.explanation.setWordWrap(True)
+        self.explanation.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        layout.addWidget(self.explanation)
+        self.help_button = QPushButton("About XDG and Flatpak…")
+        self.help_button.clicked.connect(self.show_storage_help)
+        layout.addWidget(self.help_button)
         hint = QLabel("Double-click a measured directory to inspect its immediate children.")
         layout.addWidget(hint)
         controls = QHBoxLayout()
@@ -463,6 +472,37 @@ class UserStorageDialog(QDialog):
         controls.addWidget(close)
         layout.addLayout(controls)
         self.worker = None
+
+    def show_directory_explanation(self):
+        row = self.table.currentRow()
+        path_item = self.table.item(row, 1) if row >= 0 else None
+        if path_item is None:
+            self.explanation.setText("Select a directory to learn what it may contain and why it matters.")
+            return
+        detail = explain_hidden_directory(path_item.text())
+        self.explanation.setText(
+            f"{detail.title} — {detail.category}\\n"
+            f"Purpose: {detail.purpose}\\n"
+            f"May contain: {detail.contents}\\n"
+            f"Important: {detail.caution}"
+        )
+
+    def show_storage_help(self):
+        QMessageBox.information(
+            self, "Where Linux applications store data",
+            "XDG Base Directory Specification defines conventional locations:\\n"
+            "~/.config — settings\\n"
+            "~/.local/share — persistent application data\\n"
+            "~/.local/state — application state\\n"
+            "~/.cache — caches\\n\\n"
+            "Flatpak usually isolates application data in ~/.var/app/<app-id>/, "
+            "with its own config, data and cache. Some applications use older "
+            "locations such as ~/.mozilla, and permissions can allow access "
+            "outside the sandbox.\\n\\n"
+            "Directory names do not prove ownership or safe deletion. "
+            "AppFootprint never deletes data.\\n\\n"
+            f"XDG: {XDG_DOCS}\\nFlatpak: {FLATPAK_DOCS}"
+        )
 
     def open_investigator(self, row, _column):
         status = self.table.item(row, 2)
@@ -497,6 +537,7 @@ class UserStorageDialog(QDialog):
 
     def show_results(self, entries, issues):
         self.table.setSortingEnabled(False)
+        self.table.clearSelection()
         self.table.setRowCount(len(entries))
         for row, entry in enumerate(entries):
             values = [
@@ -512,6 +553,9 @@ class UserStorageDialog(QDialog):
                 elif column == 4 and entry.status == "incomplete":
                     cell.setToolTip(allocated_tooltip(
                         entry.known_allocated_bytes, incomplete=True))
+                elif column == 0:
+                    detail = explain_hidden_directory(entry.path)
+                    cell.setToolTip(f"{detail.purpose}\\n{detail.caution}")
                 elif entry.reason:
                     cell.setToolTip(entry.reason)
                 self.table.setItem(row, column, cell)
