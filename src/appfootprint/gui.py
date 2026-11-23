@@ -94,16 +94,20 @@ class ScanThread(QThread):
 
 
 class ProviderProbeThread(QThread):
-    """Check CLI availability without blocking Qt's event loop."""
+    """Probe providers independently; publish results as soon as each completes."""
     detected = Signal(object)
+    provider_detected = Signal(object)
 
     def run(self) -> None:
-        try:
-            statuses = detect_providers()
-        except Exception as exc:
-            statuses = {"flatpak": ProviderStatus(
-                "flatpak", False, f"Provider detection failed: {exc}"
-            )}
+        from .provider_detection import probe_flatpak, probe_snap, probe_rpm
+        statuses = {}
+        for name, probe in (("flatpak", probe_flatpak), ("snap", probe_snap), ("rpm", probe_rpm)):
+            try:
+                status = probe()
+            except Exception as exc:
+                status = ProviderStatus(name, False, f"Provider detection failed: {exc}")
+            statuses[name] = status
+            self.provider_detected.emit(status)
         self.detected.emit(statuses)
 
 
@@ -1648,7 +1652,10 @@ class MainWindow(QMainWindow):
         self._flatpak_available = False
         self._snap_available = False
         self.probe = ProviderProbeThread(self)
+        self._probe_statuses = {}
+        self.probe.provider_detected.connect(self.provider_detected)
         self.probe.detected.connect(self.providers_detected)
+        self.provider_status.setText("Detecting installed package managers…")
         self.probe.start()
 
     def open_filelight(self):
@@ -1783,6 +1790,10 @@ class MainWindow(QMainWindow):
             return
         super().closeEvent(event)
 
+    def provider_detected(self, status: ProviderStatus) -> None:
+        self._probe_statuses[status.name] = status
+        self.providers_detected(self._probe_statuses)
+
     def providers_detected(self, statuses: dict[str, ProviderStatus]) -> None:
         flatpak = statuses.get("flatpak")
         snap = statuses.get("snap")
@@ -1793,15 +1804,12 @@ class MainWindow(QMainWindow):
         self.provider_versions["Flatpak"] = flatpak.version if flatpak and flatpak.available else None
         self.provider_versions["Snap"] = snap.version if snap and snap.available else None
         self.provider_versions["RPM"] = rpm.version if rpm and rpm.available else None
-        self.flatpak_card.setTitle(
-            provider_title("Flatpak", self.provider_versions["Flatpak"])
-        )
-        self.snap_card.setTitle(
-            provider_title("Snap", self.provider_versions["Snap"])
-        )
-        self.rpm_card.setTitle(
-            provider_title("RPM", self.provider_versions["RPM"])
-        )
+        for name, card, status in (
+            ("Flatpak", self.flatpak_card, flatpak),
+            ("Snap", self.snap_card, snap),
+            ("RPM", self.rpm_card, rpm),
+        ):
+            card.setTitle(provider_title(name, status.version if status and status.available else None))
         self._layout_overview_cards()
         self._position_info_buttons()
         self.button.setVisible(self._flatpak_available)
@@ -1809,10 +1817,12 @@ class MainWindow(QMainWindow):
         self.rpm_button.setVisible(self._rpm_available)
         messages = []
         for name, status in (("Flatpak", flatpak), ("Snap", snap), ("RPM", rpm)):
-            if status and status.available:
+            if status is None:
+                messages.append(f"{name}: Detecting…")
+            elif status.available:
                 messages.append(f"{name} available ({status.version or 'version unknown'}).")
             else:
-                messages.append(f"{name} unavailable: {status.reason if status else 'not detected'}.")
+                messages.append(f"{name} unavailable: {status.reason}")
         self.provider_status.setText(" ".join(messages))
         self._update_scan_labels()
         self.update_overviews()
