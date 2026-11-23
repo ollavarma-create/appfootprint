@@ -11,7 +11,7 @@ from threading import Event
 from pathlib import Path
 from collections.abc import Callable
 
-from PySide6.QtCore import QObject, QRunnable, QThread, QThreadPool, Signal, Qt, QUrl, QProcess
+from PySide6.QtCore import QObject, QRunnable, QThread, QThreadPool, Signal, Qt, QUrl, QProcess, QTimer
 from PySide6.QtGui import QDesktopServices, QColor, QPixmap, QIcon
 from PySide6.QtWidgets import (
     QApplication, QDialog, QDialogButtonBox, QHeaderView, QLabel, QMenu, QFrame, QGroupBox, QGridLayout, QSizePolicy, QToolButton, QMessageBox,
@@ -1656,6 +1656,7 @@ class MainWindow(QMainWindow):
         self.probe.provider_detected.connect(self.provider_detected)
         self.probe.detected.connect(self.providers_detected)
         self.provider_status.setText("Detecting installed package managers…")
+        QTimer.singleShot(1000, self.show_slow_provider_detection)
         self.probe.start()
 
     def open_filelight(self):
@@ -1790,6 +1791,10 @@ class MainWindow(QMainWindow):
             return
         super().closeEvent(event)
 
+    def show_slow_provider_detection(self) -> None:
+        if len(self._probe_statuses) < 3:
+            self.provider_status.show()
+
     def provider_detected(self, status: ProviderStatus) -> None:
         self._probe_statuses[status.name] = status
         self.providers_detected(self._probe_statuses)
@@ -1824,6 +1829,8 @@ class MainWindow(QMainWindow):
             else:
                 messages.append(f"{name} unavailable: {status.reason}")
         self.provider_status.setText(" ".join(messages))
+        if len(statuses) == 3:
+            self.provider_status.setVisible(any(not s.available for s in statuses.values()))
         self._update_scan_labels()
         self.update_overviews()
 
