@@ -19,7 +19,8 @@ def test_provider_button_only_when_available(monkeypatch):
         "flatpak": ProviderStatus("flatpak", False, "Not installed")
     })
     assert window.button.isHidden()
-    assert "Not installed" in window.provider_status.text()
+    assert "may not be installed" in window.provider_status.text()
+    assert "Not installed" in window.provider_status.toolTip()
     window.providers_detected({
         "flatpak": ProviderStatus("flatpak", True, "Available", "Flatpak 1.16")
     })
@@ -39,14 +40,15 @@ def test_provider_detection_messages_only_show_missing_and_pending(monkeypatch):
         "flatpak": ProviderStatus("flatpak", True, "ok", "Flatpak 1.18"),
         "snap": ProviderStatus("snap", False, "Snap executable not found"),
     })
-    assert "Snap executable not found" in window.provider_status.text()
+    assert "Snap is not available. It may not be installed." in window.provider_status.text()
+    assert "Snap executable not found" in window.provider_status.toolTip()
     assert "Detecting: RPM" in window.provider_status.text()
     window.providers_detected({
         "flatpak": ProviderStatus("flatpak", True, "ok", "Flatpak 1.18"),
         "snap": ProviderStatus("snap", False, "Snap executable not found"),
         "rpm": ProviderStatus("rpm", True, "ok", "RPM version 6.1.0"),
     })
-    assert window.provider_status.text() == "Snap: Snap executable not found"
+    assert window.provider_status.text() == "Snap is not available. It may not be installed."
     assert window.provider_status.isVisible()
     window.providers_detected({
         "flatpak": ProviderStatus("flatpak", True, "ok", "Flatpak 1.18"),
