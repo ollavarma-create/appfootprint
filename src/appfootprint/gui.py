@@ -364,9 +364,9 @@ class StorageInvestigatorDialog(QDialog):
         hint = identify_storage_hint(path_item.text()) if path_item is not None else None
         if hint:
             self.hint_label.setText(
-                f"Why is this here? {hint.title}\\n"
-                f"{hint.explanation}\\n"
-                f"Important: {hint.caution}\\n"
+                f"Why is this here? {hint.title}\n"
+                f"{hint.explanation}\n"
+                f"Important: {hint.caution}\n"
                 f"Suggested search: {hint.search_terms}"
             )
         else:
