@@ -264,9 +264,6 @@ class StorageInvestigatorDialog(QDialog):
         self.hint_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         layout.addWidget(self.hint_label)
         controls = QHBoxLayout()
-        self.scan_button = QPushButton("Scan subdirectories")
-        self.scan_button.clicked.connect(self.start_scan)
-        controls.addWidget(self.scan_button)
         self.cancel_button = QPushButton("Cancel")
         self.cancel_button.setEnabled(False)
         self.cancel_button.clicked.connect(self.cancel_scan)
@@ -294,7 +291,6 @@ class StorageInvestigatorDialog(QDialog):
     def start_scan(self):
         if self.worker is not None and self.worker.isRunning():
             return
-        self.scan_button.setEnabled(False)
         self.cancel_button.setEnabled(True)
         self.status.setText("Scanning…")
         self.worker = InvestigationThread(self.history.current, self)
@@ -306,7 +302,6 @@ class StorageInvestigatorDialog(QDialog):
         self.worker.start()
 
     def finish_scan(self):
-        self.scan_button.setEnabled(True)
         self.cancel_button.setEnabled(False)
 
     def cancel_scan(self):
@@ -487,6 +482,7 @@ class UserStorageDialog(QDialog):
         self.table.itemSelectionChanged.connect(self.show_directory_explanation)
         self.explanation = QLabel("Select a directory to learn what it may contain and why it matters.")
         self.explanation.setWordWrap(True)
+        self.explanation.setTextFormat(Qt.TextFormat.RichText)
         self.explanation.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         layout.addWidget(self.explanation)
         self.help_button = QPushButton("About XDG and Flatpak…")
@@ -518,10 +514,10 @@ class UserStorageDialog(QDialog):
             return
         detail = identify_directory(path_item.text(), self.directory_catalog)
         self.explanation.setText(
-            f"{detail.title} — {detail.category}\n"
-            f"Purpose: {detail.purpose}\n"
-            f"May contain: {detail.contents}\n"
-            f"Important: {detail.caution}"
+            f"{escape(detail.title)} — {escape(detail.category)}<br>"
+            f"<b>Purpose:</b> {escape(detail.purpose)}<br>"
+            f"<b>May contain:</b> {escape(detail.contents)}<br>"
+            f"<b>Important:</b> {escape(detail.caution)}"
         )
 
     def show_storage_help(self):
