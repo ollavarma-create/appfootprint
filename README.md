@@ -524,3 +524,56 @@ Test Flatpak/Snap/RPM scans, User Storage and nested Storage Investigator,
 Back/Forward, copy-only commands, the KDE launcher/icon and window behavior.
 Try a second distribution with an older glibc before claiming portability.
 The first successful CI build is **not** a release or compatibility guarantee.
+
+
+## Privacy and security (AppFootprint 0.2 audit)
+
+AppFootprint is designed as a **local, read-only inventory and inspection tool**.
+It does not implement telemetry, analytics reporting, an account service,
+automatic cleanup, or application-data deletion. It does not request
+administrator privileges. It displays suggested inspection commands for
+copying, **not execution**.
+
+**External programs and boundaries:** Provider discovery and scans invoke
+installed host commands for local inventory: `flatpak --version`,
+`flatpak list`, `flatpak info`, `snap version`, `snap list --all`,
+`rpm --version`, and `rpm -qa --queryformat`. The Filelight button
+explicitly launches the separately installed Filelight application.
+AppFootprint does not control side effects of those external programs,
+their libraries, or the operating system. Installation of AppFootprint's
+Python dependencies and downloading release artifacts are separate
+activities that may require network access.
+
+**Evidence, not a universal guarantee:** On Fedora KDE, a manual functional
+session exercised Flatpak, RPM, User Storage, information dialogs and
+Filelight under `strace -f -e trace=network`. The inspected log contained
+no AF_INET or AF_INET6 socket operations; local AF_UNIX IPC was observed.
+This is evidence for that run, not a guarantee that no dependency or
+external program can ever communicate over a network. A separate direct
+Filelight launch reproduced its Qt/QML console warnings.
+
+Automated tests use synthetic file trees and mocked package-manager
+commands to compare file contents (SHA-256), names, symlink targets,
+permissions, owners, sizes, modification/change timestamps, and hardlink
+counts before and after User Storage, Storage Investigator, Flatpak, and
+RPM scans. The Fedora test suite passed **138 tests** on 2026-11-23.
+These tests verify the exercised code paths; they do not prove that every
+possible filesystem, package-manager implementation, or GUI operation is
+free of side effects. Access time (`atime`) is excluded because normal
+reads can update it depending on filesystem mount options. Snap has
+existing synthetic coverage but is not included in this specific
+before/after immutability regression.
+
+Storage measurements are allocated-block observations, **not** uniquely
+reclaimable bytes. Btrfs sharing, snapshots, hardlinks, missing or
+inaccessible paths, and overlaps across providers limit interpretation.
+The application does not decide that any data is safe to remove.
+
+To repeat the local checks:
+
+```bash
+python -m pytest -q
+strace -f -e trace=network -o /tmp/appfootprint-network.log python -m appfootprint.gui
+```
+
+When sharing logs, redact usernames, paths, application data and secrets.
