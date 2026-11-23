@@ -1541,7 +1541,7 @@ class MainWindow(QMainWindow):
         self.storage_summary.setWordWrap(True)
         self.storage_summary.hide()
         self.provider_status = QLabel("Detecting installed package managers…")
-        self.provider_status.setWordWrap(True)
+        self.provider_status.setWordWrap(False)
         self.provider_status.hide()
         self.overview_group = QGroupBox()
         self.overview_heading = QLabel("Storage overview — reported bytes, not reclaimable space")
@@ -1595,11 +1595,8 @@ class MainWindow(QMainWindow):
         )
         self.overview_note.setTextFormat(Qt.TextFormat.RichText)
         self.overview_note.setWordWrap(True)
-        legend_row = QHBoxLayout()
-        legend_row.addWidget(self.overview_note)
-        legend_row.addStretch()
-        legend_row.addWidget(self.provider_status)
-        layout.addLayout(legend_row)
+        layout.addWidget(self.overview_note)
+        layout.addWidget(self.provider_status)
         self.measurement_note = QLabel(
             "Bars show measured bytes per provider only. "
             "Unknown sizes are excluded; target counts are not disk percentages."
