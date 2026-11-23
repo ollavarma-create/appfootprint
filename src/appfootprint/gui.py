@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import sys
+import shutil
 from datetime import datetime
 from threading import Event
 
 from pathlib import Path
 from collections.abc import Callable
 
-from PySide6.QtCore import QObject, QRunnable, QThread, QThreadPool, Signal, Qt, QUrl
+from PySide6.QtCore import QObject, QRunnable, QThread, QThreadPool, Signal, Qt, QUrl, QProcess
 from PySide6.QtGui import QDesktopServices, QColor, QPixmap, QIcon
 from PySide6.QtWidgets import (
     QApplication, QDialog, QDialogButtonBox, QHeaderView, QLabel, QMenu, QFrame, QGroupBox, QGridLayout, QSizePolicy, QToolButton, QMessageBox,
@@ -1519,6 +1520,11 @@ class MainWindow(QMainWindow):
         self.kind_filter.currentIndexChanged.connect(self.apply_filters)
         filters.addWidget(self.kind_filter)
         filters.addStretch()
+        self.filelight_button = QPushButton("Filelight")
+        self.filelight_button.setToolTip("Open Filelight disk usage analyzer")
+        self.filelight_button.clicked.connect(self.open_filelight)
+        self.filelight_button.setVisible(shutil.which("filelight") is not None)
+        filters.addWidget(self.filelight_button)
         self.user_storage_button = QPushButton("User Storage…")
         self.user_storage_button.clicked.connect(self.open_user_storage)
         filters.addWidget(self.user_storage_button)
@@ -1563,6 +1569,16 @@ class MainWindow(QMainWindow):
         self.probe = ProviderProbeThread(self)
         self.probe.detected.connect(self.providers_detected)
         self.probe.start()
+
+    def open_filelight(self):
+        executable = shutil.which("filelight")
+        if executable is None:
+            QMessageBox.warning(self, "Filelight unavailable", "Filelight is not installed or cannot be found in PATH.")
+            self.filelight_button.hide()
+            return
+        started, _pid = QProcess.startDetached(executable, [])
+        if not started:
+            QMessageBox.warning(self, "Filelight launch failed", "Could not start Filelight. Check the application installation.")
 
     def open_user_storage(self):
         UserStorageDialog(self).exec()
