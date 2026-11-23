@@ -1586,11 +1586,7 @@ class MainWindow(QMainWindow):
         self.flatpak_card.hide()
         self.snap_card.hide()
         self._layout_overview_cards()
-        overview_heading_row = QHBoxLayout()
-        overview_heading_row.addWidget(self.overview_heading)
-        overview_heading_row.addWidget(self.provider_status)
-        overview_heading_row.addStretch()
-        layout.addLayout(overview_heading_row)
+        layout.addWidget(self.overview_heading)
         layout.addWidget(self.overview_group)
         self.overview_note = QLabel(
             '<span style="color:#278b89">■</span> <b>Teal:</b> applications'
@@ -1599,7 +1595,11 @@ class MainWindow(QMainWindow):
         )
         self.overview_note.setTextFormat(Qt.TextFormat.RichText)
         self.overview_note.setWordWrap(True)
-        layout.addWidget(self.overview_note)
+        legend_row = QHBoxLayout()
+        legend_row.addWidget(self.overview_note)
+        legend_row.addStretch()
+        legend_row.addWidget(self.provider_status)
+        layout.addLayout(legend_row)
         self.measurement_note = QLabel(
             "Bars show measured bytes per provider only. "
             "Unknown sizes are excluded; target counts are not disk percentages."
