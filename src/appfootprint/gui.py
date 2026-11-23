@@ -417,15 +417,16 @@ class StorageInvestigatorDialog(QDialog):
 
 
 class UserStorageDialog(QDialog):
-    """Separate XDG observations; intentionally not added to provider totals."""
+    """Hidden home-directory observations; not added to provider totals."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("User Storage — read-only XDG inventory")
+        self.setWindowTitle("User Storage — hidden home directories")
         self.resize(880, 440)
         layout = QVBoxLayout(self)
         note = QLabel(
-            "Independent allocated-byte observations. Flatpak user data may overlap; "
+             "All top-level hidden home directories are inventoried, including unknown ones. "
+            "Measurements may overlap with provider totals; "
             "do not add these values to provider totals. On Btrfs, reported bytes "
             "are not guaranteed physical or reclaimable space. No deletion.")
         note.setWordWrap(True)
@@ -475,7 +476,7 @@ class UserStorageDialog(QDialog):
             return
         self.scan_button.setEnabled(False)
         self.cancel_button.setEnabled(True)
-        self.status.setText("Scanning XDG directories…")
+        self.status.setText("Scanning hidden home directories…")
         self.worker = UserStorageThread(self)
         self.worker.progress_changed.connect(self.status.setText)
         self.worker.loaded.connect(self.show_results)
